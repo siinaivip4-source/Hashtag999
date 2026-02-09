@@ -1,5 +1,3 @@
-setuptools
-wheel
 streamlit
 pandas
 Pillow
@@ -9,4 +7,7 @@ xlsxwriter
 ftfy
 regex
 tqdm
-git+https://github.com/openai/CLIP.git
+setuptools>=65.0
+wheel
+packaging
+git+https://github.com/openai/CLIP.git@main#egg=clip
