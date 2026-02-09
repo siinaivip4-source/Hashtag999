@@ -1,13 +1,13 @@
 streamlit
 pandas
 Pillow
-torch
-torchvision
+torch>=2.0.0
+torchvision>=0.15.0
 xlsxwriter
 ftfy
 regex
 tqdm
 setuptools>=65.0
 wheel
-packaging
-git+https://github.com/openai/CLIP.git@main#egg=clip
+open-clip-torch
+
