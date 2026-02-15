@@ -114,16 +114,16 @@ def load_engine():
     logger.info(f"System running on: {device}")
     
     try:
-        # Load Model OpenCLIP (ViT-B-32 - Nhẹ & Chuẩn)
+        # Load Model OpenCLIP (ViT-L-14 - Nhẹ & Chuẩn)
         model, _, preprocess = open_clip.create_model_and_transforms(
-            'ViT-B-32', 
+            'ViT-L-14', 
             pretrained='openai',
             device=device
         )
         model.eval()
         
         # Tokenizer
-        tokenizer = open_clip.get_tokenizer('ViT-B-32')
+        tokenizer = open_clip.get_tokenizer('ViT-L-14')
         
         # Pre-compute Text Embeddings (Chạy 1 lần dùng mãi mãi)
         s_prompts = [f"a {s} style artwork" for s in STYLES]
@@ -333,3 +333,4 @@ if st.session_state["results"]:
 elif not uploaded_files:
     # Màn hình chờ
     st.info("👈 Vui lòng tải ảnh từ cột bên trái để bắt đầu.")
+
