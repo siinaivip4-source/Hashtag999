@@ -9,4 +9,5 @@ torch>=2.0.0
 torchvision>=0.15.0
 setuptools>=65.0
 wheel
-https://github.com/openai/CLIP/archive/main.zip
+open-clip-torch
+
