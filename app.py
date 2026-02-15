@@ -1,8 +1,8 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 14.1 (UI Fixed)
-Description: Automated image analysis and metadata tagging tool using OpenCLIP.
+Version: 16.0 (Ultimate Precision)
+Description: Automated image analysis with strict Object-Oriented Guardrails.
 """
 
 import streamlit as st
@@ -30,80 +30,30 @@ CONFIG = {
 # --- 2. UI/UX CONFIGURATION ---
 st.set_page_config(
     page_title="Enterprise Content Tagger",
-    page_icon="💼",
+    page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded" # Mặc định mở, nhưng vẫn có nút đóng
+    initial_sidebar_state="expanded"
 )
 
-# Custom CSS: Giao diện phẳng, chuyên nghiệp + FIX LỖI MẤT NÚT SIDEBAR
+# Custom CSS: Enterprise + Fixed Sidebar Button
 st.markdown("""
     <style>
-    /* Tổng thể container */
     .main { background-color: #ffffff; }
-    
-    /* Card sản phẩm */
     div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 6px;
-        border: 1px solid #e9ecef;
+        background-color: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e9ecef;
     }
-    
-    /* Hình ảnh */
     div[data-testid="stImage"] img { border-radius: 4px; object-fit: contain; }
-    
-    /* Nút bấm Primary */
-    div[data-testid="stButton"] > button[kind="primary"] {
-        background-color: #0f5132 !important;
-        border-color: #0f5132 !important;
-        color: white !important;
-        border-radius: 4px;
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+    div[data-testid="stButton"] > button[kind="primary"], div[data-testid="stDownloadButton"] > button {
+        background-color: #0f5132 !important; border-color: #0f5132 !important; color: white !important; font-weight: bold;
     }
-    
-    /* Nút Download */
-    div[data-testid="stDownloadButton"] > button {
-        background-color: #0f5132 !important;
-        border-color: #0f5132 !important;
-        color: white !important;
-        border-radius: 4px;
-        font-weight: 500;
-        width: 100%;
-    }
-
-    /* Typography */
-    h1, h2, h3 { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #212529; }
-    .stSelectbox, .stTextInput { font-size: 0.9rem; }
-    div[data-testid="stCaptionContainer"] { font-size: 0.8rem; color: #6c757d; }
-
-    /* --- [FIX] KHÔI PHỤC NÚT ĐÓNG/MỞ SIDEBAR --- */
-    
-    /* 1. Hiển thị rõ ràng nút mũi tên (Chevron) ở góc trái */
-    button[kind="header"] {
-        background-color: transparent !important;
-        color: #212529 !important; /* Màu đen đậm để dễ nhìn */
-        opacity: 1 !important;
-        display: block !important;
-        z-index: 999999 !important; /* Luôn nằm trên cùng */
-    }
-    
-    /* 2. Đảm bảo thanh header của sidebar không bị ẩn */
-    div[data-testid="stSidebarNav"] {
-        display: block !important;
-    }
-
-    /* 3. Màu sắc khi hover vào nút đóng mở */
-    button[kind="header"]:hover {
-        color: #0f5132 !important; /* Xanh doanh nghiệp khi di chuột */
-        background-color: #f0f0f0 !important;
-    }
+    /* FIX NÚT SIDEBAR */
+    button[kind="header"] { color: #212529 !important; display: block !important; opacity: 1 !important; }
+    div[data-testid="stSidebarNav"] { display: block !important; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản Doanh nghiệp (Enterprise Edition)** | Powered by OpenCLIP AI")
+st.markdown("**Phiên bản V16 (Ultimate Precision)** | Dual Guardrails Technology")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
@@ -125,51 +75,93 @@ UI_COLORS = ["None"] + AI_COLORS
 UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Lovely", "Funny", "ZenMode"]
 UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
 
-# Guardrails Logic
+# --- [CORE] GUARDRAILS LOGIC (ĐỊNH NGHĨA CHẶT CHẼ) ---
+
+# 1. STYLE: Định nghĩa dựa trên kỹ thuật tạo hình (Render/Vector/Photo...)
 STYLE_PROMPT_MAP = {
-    "2D": "flat 2d illustration vector art cartoon style",
-    "3D": "3d computer graphics blender render c4d realistic material",
-    "Cute": "cute kawaii chibi adorable character design soft shapes",
-    "Animeart": "anime style japanese manga illustration cel shaded",
-    "Realism": "photorealistic photography 4k high definition real life",
-    "Aesthetic": "aesthetic artistic beautiful composition trending on artstation",
-    "Cool": "cool stylish edgy fashion streetwear vibe",
-    "Fantasy": "fantasy art magic dungeons and dragons medieval warrior",
-    "Comic": "comic book style bold lines pop art western comic marvel dc",
-    "Horror": "horror scary creepy dark nightmare monster gore",
-    "Cyberpunk": "cyberpunk futuristic sci-fi neon high tech city low life",
-    "Lofi": "lofi hip hop style chill retro anime aesthetic study girl",
-    "Minimalism": "minimalism simple clean lines minimal art negative space",
-    "Digitalart": "digital art digital painting wacom tablet drawing concept art",
-    "Cinematic": "cinematic movie scene dramatic lighting wide shot film grain",
-    "Pixelart": "pixel art 8-bit retro video game style sprite",
-    "Scifi": "sci-fi science fiction space future technology alien spaceship",
-    "Vangoghart": "vincent van gogh style starry night impressionism oil painting swirl"
+    # 2D: Phải là vector, nét phẳng, không có bóng đổ khối
+    "2D": "flat 2d vector art, simple lines, cartoon illustration, no realistic shading",
+    
+    # 3D: Phải là đồ họa máy tính, render, khối nổi
+    "3D": "3d computer graphics, blender render, c4d, unreal engine, volumetric lighting, plastic material",
+    
+    # Realism: Phải là ảnh chụp thật
+    "Realism": "real life photography, 4k photo, raw camera image, hyperrealistic skin texture, dslr",
+    
+    # Anime: Đặc trưng truyện tranh Nhật
+    "Animeart": "anime style, japanese manga, cel shading, 2d character design, waifu",
+    
+    # Cinematic: Ánh sáng điện ảnh, giống phim
+    "Cinematic": "cinematic movie scene, dramatic lighting, film grain, wide shot, movie poster style",
+    
+    # Digital Art: Vẽ trên máy tính (Wacom)
+    "Digitalart": "digital painting, wacom tablet drawing, highly detailed concept art, artstation style",
+    
+    # Pixel Art: Ô vuông
+    "Pixelart": "pixel art, 8-bit, 16-bit, dot matrix, blocky edges, retro game",
+    
+    # Vangogh: Nét cọ sơn dầu
+    "Vangoghart": "vincent van gogh style, oil painting, thick brush strokes, impressionism, starry night",
+    
+    # Cyberpunk: Đèn Neon + Công nghệ cao
+    "Cyberpunk": "cyberpunk city, neon lights, high tech low life, futuristic sci-fi, cyborg",
+    
+    # Lofi: Chill, nét mềm, hoạt hình retro
+    "Lofi": "lofi hip hop style, chill vibes, retro anime aesthetic, study girl, soft lighting",
+    
+    # Vintage: Màu cũ, nhiễu hạt
+    "Vintage": "vintage retro style, sepia tone, old photograph, film grain, noise, 1980s",
+    
+    # Horror: Tối tăm, đáng sợ
+    "Horror": "horror theme, scary, creepy, dark nightmare, monster, gore, blood",
+    
+    # Minimalism: Ít chi tiết
+    "Minimalism": "minimalism, simple clean lines, minimal art, negative space, simple background",
+    
+    # Cute: Dễ thương, tròn trịa
+    "Cute": "cute kawaii, chibi style, adorable character, soft shapes, pastel vibe",
+    
+    # Cool: Thời trang, ngầu (Dành cho Fashion)
+    "Cool": "cool stylish fashion, streetwear, edgy vibe, magazine cover, posing",
+    
+    # Aesthetic: Bố cục đẹp, nghệ thuật
+    "Aesthetic": "aesthetic artistic composition, beautiful lighting, dreamy atmosphere, tumblr style",
+    
+    # Fantasy: Phép thuật, trung cổ
+    "Fantasy": "fantasy art, magic, dungeons and dragons, medieval armor, sword, wizard",
+    
+    # Comic: Nét đậm, truyện tranh Mỹ
+    "Comic": "comic book style, bold outlines, pop art, marvel dc style, halftone dots",
+    
+    # Scifi: Vũ trụ, tàu không gian
+    "Scifi": "sci-fi, science fiction, outer space, spaceship, alien, futuristic technology"
 }
+
+# 2. COLOR: Định nghĩa dựa trên Vật thể/Quần áo (Đã Fix lỗi Black/Red)
 COLOR_PROMPT_MAP = {
-    "Black": "mostly black dark void background",
-    "White": "mostly pure white bright background",
-    "Blackandwhite": "black and white monochrome photography greyscale",
-    "Red": "dominant bright red color object or clothes",
-    "Yellow": "dominant bright yellow color sunlight or object",
-    "Blue": "dominant blue color sky ocean or object",
-    "Green": "dominant green color nature plants or object",
-    "Pink": "dominant pink color cute flower or object",
-    "Orange": "dominant orange color sunset or fruit",
-    "Pastel": "soft pastel colors light desaturated tones",
-    "Hologram": "holographic iridescent rainbow silver metallic texture",
-    "Vintage": "vintage retro style sepia old photo paper",
-    "Colorful": "many different vibrant colors rainbow confetti",
-    "Neutral": "neutral beige earth tones minimalist skin tone",
-    "Light": "bright high key lighting sunny atmosphere",
-    "Dark": "dark dim lighting low light night shadow",
-    "Warm": "warm colors temperature red orange yellow heating",
-    "Cold": "cold colors temperature blue cyan ice cool lighting",
-    "Neon": "glowing neon lights cyberpunk laser",
-    "Gradient": "smooth color gradient transition blurred background",
-    "Purple": "dominant purple violet lavender color",
-    "Brown": "dominant brown color wood earth chocolate",
-    "Grey": "dominant grey color concrete silver metal",
+    "Black": "black clothing, black outfit, black object, black fashion, matte black material",
+    "White": "white clothing, white outfit, white object, bright white surface",
+    "Blackandwhite": "black and white photography, monochrome, greyscale image",
+    "Red": "bright red clothing, red car, red flower, crimson object, strong red color",
+    "Yellow": "bright yellow clothing, yellow object, sunflower color, golden yellow",
+    "Blue": "blue clothing, blue sky, blue ocean, blue object, cyan",
+    "Green": "green clothing, green plants, nature, forest, green object",
+    "Pink": "pink clothing, pink flower, magenta, hot pink object",
+    "Orange": "orange clothing, orange fruit, sunset color, pumpkin orange",
+    "Pastel": "soft pastel colors, pale pink blue yellow, baby colors",
+    "Hologram": "holographic texture, iridescent rainbow reflection, metallic silver rainbow",
+    "Vintage": "sepia tone, old photograph style, retro brown filter",
+    "Colorful": "rainbow colors, many different vibrant colors, confetti, festival",
+    "Neutral": "beige clothing, cream color, skin tone, earth tones, sand color",
+    "Light": "bright image, high key lighting, sunny day, white background",
+    "Dark": "low key lighting, night scene, shadows, silhouette, dark room",
+    "Warm": "warm lighting, orange tone, golden hour, cozy atmosphere",
+    "Cold": "cold lighting, blue tone, winter atmosphere, ice",
+    "Neon": "glowing neon signs, cyberpunk lights, laser beam",
+    "Gradient": "smooth color gradient background, blurred transition",
+    "Purple": "purple clothing, violet, lavender object, grape color",
+    "Brown": "brown clothing, wooden texture, chocolate color, soil",
+    "Grey": "grey clothing, concrete wall, silver metal, grey object, ash color",
 }
 
 # --- 4. CORE ENGINE ---
@@ -181,6 +173,7 @@ def load_ai_engine():
         model, _, preprocess = open_clip.create_model_and_transforms(CONFIG["MODEL_NAME"], pretrained=CONFIG["PRETRAINED"], device=device)
         tokenizer = open_clip.get_tokenizer(CONFIG["MODEL_NAME"])
         
+        # Tạo Vectors từ Map đã định nghĩa
         s_texts = [STYLE_PROMPT_MAP.get(s, f"a {s} style artwork") for s in AI_STYLES]
         c_texts = [COLOR_PROMPT_MAP.get(c, f"dominant color is {c}") for c in AI_COLORS]
         
@@ -217,11 +210,26 @@ def analyze_image(file_obj) -> Dict:
             img_feat = model.encode_image(input_img)
             img_feat /= img_feat.norm(dim=-1, keepdim=True)
             
-        s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
-        c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
+        # Tính toán xác suất
+        s_probs = (100.0 * img_feat @ s_feat.T).softmax(dim=-1)
+        c_probs = (100.0 * img_feat @ c_feat.T).softmax(dim=-1)
         
-        return {"status": "success", "filename": file_obj.name, "image_obj": thumb, "object": "", 
-                "style": AI_STYLES[s_idx], "color": AI_COLORS[c_idx], "mood": "None", "gender": "None"}
+        s_idx = s_probs.argmax().item()
+        c_idx = c_probs.argmax().item()
+        
+        # Debug Confidence
+        s_score = s_probs[0][s_idx].item() * 100
+        c_score = c_probs[0][c_idx].item() * 100
+        
+        return {
+            "status": "success", "filename": file_obj.name, "image_obj": thumb, 
+            "object": "", 
+            "style": AI_STYLES[s_idx], 
+            "color": AI_COLORS[c_idx], 
+            "confidence_s": f"{s_score:.1f}%",
+            "confidence_c": f"{c_score:.1f}%",
+            "mood": "None", "gender": "None"
+        }
     except Exception as e:
         return {"status": "error", "filename": file_obj.name, "msg": str(e)}
 
@@ -230,6 +238,9 @@ def render_image_card(idx: int, item: Dict, start_num: int):
     with st.container(border=True):
         st.image(item["image_obj"], use_container_width=True)
         st.caption(f"STT: {start_num + idx} | File: {item['filename']}")
+        
+        # Hiển thị độ tin cậy của AI (Rất tốt để debug)
+        st.caption(f"🎯 AI: {item['style']} ({item.get('confidence_s','?')}) | {item['color']} ({item.get('confidence_c','?')})")
         
         new_obj = st.text_input("Đối tượng (Object)", value=item["object"], key=f"obj_{idx}", label_visibility="collapsed", placeholder="Nhập tên đối tượng...")
         
