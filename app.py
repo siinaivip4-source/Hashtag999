@@ -1,250 +1,293 @@
 import streamlit as st
 import pandas as pd
 from PIL import Image
+import io
 import torch
 import clip
-import io
-import os
-import time
+import logging
+from typing import List, Tuple, Dict
 
-# --- 1. CẤU HÌNH HỆ THỐNG & DATASET ---
-st.set_page_config(page_title="AI Master V10 - Ultimate Batch", page_icon="🔥", layout="wide")
+# --- 0. CẤU HÌNH HỆ THỐNG (SYSTEM CONFIG) ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Bộ lọc chuẩn theo yêu cầu của Đại sư huynh
-CONFIG = {
-    "STYLES": [
-        "2D", "3D", "Cute", "Animeart", "Realism", "Aesthetic", "Cool", 
-        "Fantasy", "Comic", "Horror", "Cyberpunk", "Lofi", "Minimalism"
-    ],
-    "COLORS": [
-        "Red", "Blue", "Green", "Yellow", "Black", "White", "Pink", 
-        "Purple", "Orange", "Pastel", "Neon", "Dark", "Bright"
-    ],
-    "EMOTIONS": [
-        "Happy", "Sad", "Lonely", "Funny", "Gratitude", "Nostalgia", "Zenmode"
-    ],
-    "GENDERS": [
-        "Male", "Female", "Non-binary", "Unisex"
-    ]
-}
+# Các giới hạn hệ thống
+MAX_IMAGES = 50                 
+MAX_FILE_SIZE_MB = 10           
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+THUMBNAIL_SIZE = (300, 300)     
+CLIP_INPUT_SIZE = (224, 224)    
 
-# --- 2. CLASS: AI ENGINE (CLIP L14) ---
-class AIEngine:
-    def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = None
-        self.preprocess = None
-        self.encoded_features = {} # Cache text features
+# --- 1. THIẾT LẬP GIAO DIỆN & CSS (UI/UX) ---
+st.set_page_config(
+    page_title="AI Master V9 - Content Optimizer", 
+    page_icon="✨", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-    def load_model(self):
-        if self.model is None:
-            try:
-                # Load model L14 xịn xò
-                self.model, self.preprocess = clip.load("ViT-L/14", device=self.device)
-                self.precompute_features()
-                return True
-            except Exception as e:
-                st.error(f"Lỗi load AI: {e}")
-                return False
-        return True
+# Custom CSS: Ép màu XANH LÁ cho cả nút PHÂN TÍCH và TẢI EXCEL
+st.markdown("""
+    <style>
+    /* 1. Viền ảnh mềm mại */
+    div[data-testid="stImage"] {
+        border-radius: 8px; 
+        overflow: hidden; 
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    /* 2. Style chung cho các nút bấm */
+    .stButton>button {
+        width: 100%; 
+        border-radius: 6px; 
+        font-weight: 600; 
+        height: 3em;
+    }
+    
+    /* 3. [QUAN TRỌNG] ÉP MÀU XANH CHO NÚT PHÂN TÍCH (Primary Button) */
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background-color: #217346 !important;
+        border-color: #1e6b41 !important;
+        color: white !important;
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        background-color: #1e6b41 !important;
+        box-shadow: 0 4px 8px rgba(33, 115, 70, 0.4);
+    }
 
-    def precompute_features(self):
-        """Mã hóa trước toàn bộ text để tốc độ nhanh gấp 4 lần"""
-        with torch.no_grad():
-            for category, labels in CONFIG.items():
-                text_inputs = clip.tokenize([f"a {l} style/person/feeling" for l in labels]).to(self.device)
-                features = self.model.encode_text(text_inputs)
-                features /= features.norm(dim=-1, keepdim=True)
-                self.encoded_features[category] = (features, labels)
+    /* 4. [QUAN TRỌNG] ÉP MÀU XANH CHO NÚT TẢI EXCEL (Download Button) */
+    div[data-testid="stDownloadButton"] > button {
+        background-color: #217346 !important;
+        border-color: #1e6b41 !important;
+        color: white !important;
+    }
+    div[data-testid="stDownloadButton"] > button:hover {
+        background-color: #1e6b41 !important;
+        border-color: #1e6b41 !important;
+        box-shadow: 0 4px 8px rgba(33, 115, 70, 0.4);
+    }
+    div[data-testid="stDownloadButton"] > button:active {
+        background-color: #1e6b41 !important;
+        color: white !important;
+    }
 
-    def analyze_image(self, image):
-        """Trả về 1 dictionary chứa kết quả của 4 loại"""
-        results = {}
-        img_input = self.preprocess(image).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            img_feat = self.model.encode_image(img_input)
-            img_feat /= img_feat.norm(dim=-1, keepdim=True)
+    /* 5. Dropdown Label */
+    div.stSelectbox > label {
+        font-weight: 600; 
+        color: #333;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-            # Quét qua từng category (Style, Color, Emotion, Gender)
-            for category, (text_feat, labels) in self.encoded_features.items():
-                # Tính độ tương đồng
-                similarity = (100.0 * img_feat @ text_feat.T).softmax(dim=-1)
-                # Lấy cái cao nhất (Best match)
-                idx = similarity[0].argmax().item()
-                results[category] = labels[idx]
-        
-        return results
+st.title("✨ AI MASTER V9 - CONTENT OPTIMIZER")
+st.markdown("#### Hệ thống tự động phân tích và tối ưu hóa Hashtag cho hình ảnh")
+st.markdown("---")
 
-# Singleton Pattern cho AI
-if 'ai_engine' not in st.session_state:
-    st.session_state['ai_engine'] = AIEngine()
+# --- 2. DỮ LIỆU PHÂN LOẠI (DATASET) ---
+STYLES = [
+    "2D", "3D", "Cute", "Animeart", "Realism", 
+    "Aesthetic", "Cool", "Fantasy", "Comic", "Horror", 
+    "Cyberpunk", "Lofi", "Minimalism", "Digitalart", "Cinematic", 
+    "Pixelart", "Scifi", "Vangoghart"
+]
 
-# --- 3. UI: QUẢN LÝ CUSTOM HASHTAG ---
-def render_sidebar():
-    st.sidebar.title("🔧 Cấu hình")
-    st.sidebar.markdown("---")
-    
-    st.sidebar.subheader("🏷️ Custom Hashtags")
-    st.sidebar.caption("Thêm tag cố định (VD: #Trending, #Hot)")
-    
-    # Logic quản lý thêm/xóa
-    if "custom_tags" not in st.session_state:
-        st.session_state["custom_tags"] = []
+COLORS = [
+    "Black", "White", "Blackandwhite", "Red", "Yellow", 
+    "Blue", "Green", "Pink", "Orange", "Pastel", 
+    "Hologram", "Vintage", "Colorful", "Neutral", "Light", 
+    "Dark", "Warm", "Cold", "Neon", "Gradient", 
+    "Purple", "Brown", "Grey"
+]
 
-    # Input thêm tag
-    new_tag = st.sidebar.text_input("Thêm hashtag mới (Không cần dấu #):")
-    
-    c1, c2 = st.sidebar.columns(2)
-    if c1.button("➕ Thêm"):
-        if len(st.session_state["custom_tags"]) >= 5:
-            st.sidebar.error("⚠️ Tối đa 5 Custom Hashtag thôi huynh ơi!")
-        elif new_tag and new_tag not in st.session_state["custom_tags"]:
-            st.session_state["custom_tags"].append(new_tag)
-            st.rerun()
+# --- 3. KHỞI ĐỘNG AI ENGINE ---
+@st.cache_resource
+def load_engine():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"System running on: {device}")
+    
+    try:
+        model, preprocess = clip.load("ViT-B/32", device=device)
+        
+        s_prompts = [f"a {s} style artwork" for s in STYLES]
+        c_prompts = [f"dominant color is {c}" for c in COLORS]
+        
+        s_vectors = clip.tokenize(s_prompts).to(device)
+        c_vectors = clip.tokenize(c_prompts).to(device)
+        
+        with torch.no_grad():
+            s_feat = model.encode_text(s_vectors)
+            c_feat = model.encode_text(c_vectors)
+            s_feat /= s_feat.norm(dim=-1, keepdim=True)
+            c_feat /= c_feat.norm(dim=-1, keepdim=True)
+            
+        return model, preprocess, s_feat, c_feat, device
+    except Exception as e:
+        logger.error(f"Critical Error - Model Load Failed: {e}")
+        raise e
 
-    if c2.button("🗑️ Xóa All"):
-        if len(st.session_state["custom_tags"]) > 0: # Đảm bảo logic tối thiểu
-             st.session_state["custom_tags"] = []
-             st.rerun()
+try:
+    with st.spinner("⏳ Đang khởi động hệ thống AI..."):
+        model, preprocess, s_feat, c_feat, device = load_engine()
+except Exception as e:
+    st.error(f"Lỗi hệ thống: {e}")
+    st.stop()
 
-    # Hiển thị danh sách hiện tại
-    st.sidebar.write("Dataset hiện tại:")
-    for tag in st.session_state["custom_tags"]:
-        st.sidebar.markdown(f"- `#{tag}`")
+# --- 4. HÀM XỬ LÝ ẢNH (OPTIMIZED) ---
+def process_single_image(file_obj) -> Dict:
+    try:
+        file_bytes = file_obj.getvalue()
+        original_img = Image.open(io.BytesIO(file_bytes))
+        
+        if original_img.mode != "RGB":
+            original_img = original_img.convert("RGB")
+            
+        # RAM Saver
+        thumb = original_img.copy()
+        thumb.thumbnail(THUMBNAIL_SIZE)
+        
+        # CPU Saver
+        input_img = original_img.resize(CLIP_INPUT_SIZE)
+        img_input = preprocess(input_img).unsqueeze(0).to(device)
+        
+        with torch.no_grad():
+            img_feat = model.encode_image(img_input)
+            img_feat /= img_feat.norm(dim=-1, keepdim=True)
+            
+        s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
+        c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
+        
+        return {
+            "status": "ok",
+            "filename": file_obj.name,
+            "image_obj": thumb,
+            "style": STYLES[s_idx],
+            "color": COLORS[c_idx]
+        }
+    except Exception as e:
+        logger.error(f"Error processing {file_obj.name}: {e}")
+        return {"status": "error", "filename": file_obj.name, "msg": str(e)}
 
-    if len(st.session_state["custom_tags"]) == 0:
-        st.sidebar.warning("⚠️ Đang không có Custom Tag nào.")
+def display_image_editor(idx: int, item: Dict, start_num: int):
+    with st.container(border=True):
+        st.image(item["image_obj"], use_container_width=True)
+        st.caption(f"#{start_num + idx} - {item['filename']}")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            new_s = st.selectbox("Phong cách", STYLES, index=STYLES.index(item["style"]), key=f"s_{idx}")
+        with c2:
+            new_c = st.selectbox("Màu chủ đạo", COLORS, index=COLORS.index(item["color"]), key=f"c_{idx}")
+        
+        st.session_state["results"][idx]["style"] = new_s
+        st.session_state["results"][idx]["color"] = new_c
 
-    return st.session_state["custom_tags"]
+# --- 5. SIDEBAR ---
+with st.sidebar:
+    st.header("⚙️ Bảng Điều Khiển")
+    
+    st.info("💡 **Hướng dẫn:** Tải ảnh lên -> Hệ thống tự động gắn thẻ -> Tải file Excel.")
+    
+    start_idx = st.number_input("Số thứ tự bắt đầu (STT):", value=1, step=1, min_value=1)
+    
+    uploaded_files = st.file_uploader(
+        f"Tải ảnh lên (Tối đa {MAX_IMAGES} ảnh):", 
+        type=['png','jpg','jpeg','webp'], 
+        accept_multiple_files=True,
+        help="Hỗ trợ định dạng PNG, JPG, WEBP. Dung lượng tối đa 10MB/ảnh."
+    )
+    
+    # Nút này sẽ có MÀU XANH do CSS (kind="primary")
+    analyze_btn = st.button("🚀 BẮT ĐẦU PHÂN TÍCH", type="primary")
+    
+    st.markdown("---")
+    # Nút này giữ nguyên màu mặc định (Trắng/Xám)
+    if st.button("🔄 Làm mới hệ thống"):
+        st.session_state.clear()
+        st.rerun()
 
-# --- 4. LOGIC XUẤT MYSQL ---
-def generate_mysql_dump(df):
-    """Tạo file .sql chứa lệnh INSERT"""
-    table_name = "image_hashtags"
-    sql_lines = []
-    
-    sql_lines.append(f"CREATE TABLE IF NOT EXISTS {table_name} (")
-    sql_lines.append("    id INT AUTO_INCREMENT PRIMARY KEY,")
-    sql_lines.append("    filename VARCHAR(255),")
-    sql_lines.append("    style VARCHAR(50),")
-    sql_lines.append("    color VARCHAR(50),")
-    sql_lines.append("    emotion VARCHAR(50),")
-    sql_lines.append("    gender VARCHAR(50),")
-    sql_lines.append("    custom_tags TEXT,")
-    sql_lines.append("    full_hashtags TEXT")
-    sql_lines.append(");")
-    sql_lines.append("")
+# --- 6. MAIN LOGIC ---
+if "results" not in st.session_state:
+    st.session_state["results"] = []
 
-    for index, row in df.iterrows():
-        # Escape single quotes để tránh lỗi SQL Injection
-        fname = str(row['Filename']).replace("'", "\\'")
-        full_tags = str(row['Full_Hashtags']).replace("'", "\\'")
-        
-        val_str = f"('{fname}', '{row['Style']}', '{row['Color']}', '{row['Emotion']}', '{row['Gender']}', '{row['Custom']}', '{full_tags}')"
-        sql_lines.append(f"INSERT INTO {table_name} (filename, style, color, emotion, gender, custom_tags, full_hashtags) VALUES {val_str};")
-    
-    return "\n".join(sql_lines)
+if analyze_btn and uploaded_files:
+    if len(uploaded_files) > MAX_IMAGES:
+        st.error(f"⚠️ Vui lòng tải lên tối đa {MAX_IMAGES} ảnh.")
+        st.stop()
+        
+    temp_results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    total_files = len(uploaded_files)
+    
+    for i, file in enumerate(uploaded_files):
+        if file.size > MAX_FILE_SIZE_BYTES:
+            st.warning(f"⚠️ Bỏ qua: {file.name} (>10MB)")
+            continue
+            
+        status_text.text(f"Đang phân tích: {file.name} ({i+1}/{total_files})...")
+        res = process_single_image(file)
+        
+        if res["status"] == "ok":
+            res["id"] = i
+            temp_results.append(res)
+        else:
+            st.warning(f"⚠️ Lỗi ảnh {res['filename']}: {res['msg']}")
+            
+        progress_bar.progress((i+1)/total_files)
+    
+    st.session_state["results"] = temp_results
+    status_text.success(f"✅ Hoàn tất! Đã xử lý {len(temp_results)} ảnh.")
+    progress_bar.empty()
 
-# --- 5. MAIN APP ---
-def main():
-    st.title("🔥 AI MASTER V10 - BATCH PROCESSOR")
-    st.markdown("### Hệ thống phân tích đa luồng: Style - Color - Emotion - Gender")
-    
-    # Load Custom Tags từ Sidebar
-    custom_tags = render_sidebar()
-    
-    # Load AI
-    engine = st.session_state['ai_engine']
-    if not engine.load_model():
-        st.stop()
+# --- 7. EXPORT & DISPLAY ---
+if st.session_state["results"]:
+    st.divider()
+    
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.subheader(f"📊 Kết quả phân tích ({len(st.session_state['results'])} ảnh)")
+        st.caption("Kiểm tra và chỉnh sửa trước khi xuất file.")
+    with c2:
+        export_data = []
+        for i, item in enumerate(st.session_state["results"]):
+            export_data.append({
+                "STT": start_idx + i,
+                "Tên tập tin": item["filename"],
+                "Hashtag Style": item["style"],
+                "Hashtag Color": item["color"]
+            })
+        df = pd.DataFrame(export_data)
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False)
+            worksheet = writer.sheets['Sheet1']
+            worksheet.set_column(0, 0, 5)
+            worksheet.set_column(1, 1, 30)
+            worksheet.set_column(2, 3, 20)
+            
+        # Nút này sẽ có MÀU XANH do CSS (stDownloadButton)
+        st.download_button(
+            label="📥 TẢI VỀ FILE EXCEL",
+            data=buffer.getvalue(),
+            file_name="ket_qua_hashtags.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-    # TẠO TAB
-    tab_batch, tab_manual = st.tabs(["📁 BATCH FOLDER", "👁️ VIEW MANUAL"])
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    with tab_batch:
-        st.markdown("#### 📂 Xử lý hàng loạt (Batch Processing)")
-        st.info("💡 Chọn nhiều ảnh cùng lúc để giả lập xử lý cả thư mục.")
-        
-        uploaded_files = st.file_uploader("Kéo thả ảnh vào đây:", type=['jpg', 'png', 'jpeg', 'webp'], accept_multiple_files=True)
-        
-        if st.button("🚀 BẮT ĐẦU PHÂN TÍCH BATCH", type="primary"):
-            if not uploaded_files:
-                st.warning("⚠️ Huynh chưa chọn ảnh nào cả!")
-            else:
-                results = []
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for i, file_obj in enumerate(uploaded_files):
-                    status_text.text(f"Đang phân tích: {file_obj.name}...")
-                    
-                    try:
-                        image = Image.open(file_obj).convert("RGB")
-                        
-                        # AI Phân tích 4 khía cạnh
-                        ai_res = engine.analyze_image(image)
-                        
-                        # Tổng hợp Hashtag
-                        # Logic: Mỗi ảnh 1 Style, 1 Color, 1 Emotion, 1 Gender + Custom Tags
-                        tags_list = [
-                            f"#{ai_res['STYLES']}",
-                            f"#{ai_res['COLORS']}",
-                            f"#{ai_res['EMOTIONS']}",
-                            f"#{ai_res['GENDERS']}"
-                        ]
-                        # Thêm Custom tags
-                        tags_list.extend([f"#{t}" for t in custom_tags])
-                        
-                        full_string = " ".join(tags_list)
-                        
-                        results.append({
-                            "Filename": file_obj.name,
-                            "Style": ai_res['STYLES'],
-                            "Color": ai_res['COLORS'],
-                            "Emotion": ai_res['EMOTIONS'],
-                            "Gender": ai_res['GENDERS'],
-                            "Custom": ", ".join(custom_tags),
-                            "Full_Hashtags": full_string
-                        })
-                        
-                    except Exception as e:
-                        st.error(f"Lỗi file {file_obj.name}: {e}")
-                    
-                    progress_bar.progress((i + 1) / len(uploaded_files))
-                
-                status_text.success(f"✅ Đã xử lý xong {len(uploaded_files)} ảnh!")
-                progress_bar.empty()
-                
-                # --- HIỂN THỊ VÀ XUẤT FILE ---
-                if results:
-                    df = pd.DataFrame(results)
-                    st.dataframe(df, use_container_width=True)
-                    
-                    c1, c2 = st.columns(2)
-                    
-                    # 1. Xuất Excel
-                    with c1:
-                        buffer_excel = io.BytesIO()
-                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                            df.to_excel(writer, index=False)
-                        
-                        st.download_button(
-                            label="📥 Tải Excel Report (.xlsx)",
-                            data=buffer_excel.getvalue(),
-                            file_name="batch_result.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                        
-                    # 2. Xuất MySQL
-                    with c2:
-                        sql_content = generate_mysql_dump(df)
-                        st.download_button(
-                            label="🐬 Tải MySQL Dump (.sql)",
-                            data=sql_content,
-                            file_name="batch_result.sql",
-                            mime="text/plain"
-                        )
+    cols = st.columns(3)
+    for i, item in enumerate(st.session_state["results"]):
+        with cols[i % 3]: 
+            display_image_editor(i, item, start_idx)
 
-if __name__ == "__main__":
-    main()
+elif not uploaded_files:
+    st.info("👈 Vui lòng tải ảnh lên từ thanh điều khiển bên trái để bắt đầu.")
+    with st.expander("ℹ️ Giới thiệu tính năng"):
+        st.markdown("""
+        **AI Master V9** sử dụng công nghệ CLIP để:
+        1.  **Nhận diện Style & Color** tự động.
+        2.  **Tối ưu hóa** quy trình làm nội dung.
+        3.  **Xuất Excel** nhanh chóng.
+        """)
+requirements như nào
