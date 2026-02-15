@@ -1,3 +1,4 @@
+git+https://github.com/openai/CLIP.git
 streamlit
 pandas
 Pillow
@@ -10,3 +11,4 @@ tqdm
 setuptools>=65.0
 wheel
 open-clip-torch
+
