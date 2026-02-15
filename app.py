@@ -1,7 +1,7 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 16.0 (Ultimate Precision)
+Version: 16.1 (UI Final Fix)
 Description: Automated image analysis with strict Object-Oriented Guardrails.
 """
 
@@ -35,25 +35,56 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: Enterprise + Fixed Sidebar Button
+# Custom CSS: Enterprise + FORCE SIDEBAR BUTTON VISIBILITY
 st.markdown("""
     <style>
+    /* Tổng thể */
     .main { background-color: #ffffff; }
+    
+    /* Card sản phẩm */
     div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
         background-color: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e9ecef;
     }
+    
+    /* Hình ảnh */
     div[data-testid="stImage"] img { border-radius: 4px; object-fit: contain; }
+    
+    /* Nút bấm Primary */
     div[data-testid="stButton"] > button[kind="primary"], div[data-testid="stDownloadButton"] > button {
         background-color: #0f5132 !important; border-color: #0f5132 !important; color: white !important; font-weight: bold;
     }
-    /* FIX NÚT SIDEBAR */
-    button[kind="header"] { color: #212529 !important; display: block !important; opacity: 1 !important; }
-    div[data-testid="stSidebarNav"] { display: block !important; }
+
+    /* --- [FIX QUAN TRỌNG] HIỂN THỊ NÚT ĐÓNG/MỞ SIDEBAR --- */
+    
+    /* 1. Nút đóng (Dấu mũi tên) nằm TRONG Sidebar */
+    section[data-testid="stSidebar"] button {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        color: #0f5132 !important; /* Màu xanh doanh nghiệp cho dễ nhìn */
+        background-color: transparent !important;
+    }
+
+    /* 2. Nút mở (Dấu mũi tên) khi Sidebar đã đóng */
+    button[data-testid="baseButton-header"] {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        color: #0f5132 !important;
+    }
+    
+    /* 3. Xử lý trường hợp Streamlit đổi class name (Dự phòng) */
+    [data-testid="collapsedControl"] {
+        display: block !important;
+        visibility: visible !important;
+        color: #0f5132 !important;
+    }
+    
     </style>
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V16 (Ultimate Precision)** | Dual Guardrails Technology")
+st.markdown("**Phiên bản V16.1 (UI Final Fix)** | Dual Guardrails Technology")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
@@ -75,69 +106,29 @@ UI_COLORS = ["None"] + AI_COLORS
 UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Lovely", "Funny", "ZenMode"]
 UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
 
-# --- [CORE] GUARDRAILS LOGIC (ĐỊNH NGHĨA CHẶT CHẼ) ---
-
-# 1. STYLE: Định nghĩa dựa trên kỹ thuật tạo hình (Render/Vector/Photo...)
+# --- [CORE] GUARDRAILS LOGIC ---
 STYLE_PROMPT_MAP = {
-    # 2D: Phải là vector, nét phẳng, không có bóng đổ khối
     "2D": "flat 2d vector art, simple lines, cartoon illustration, no realistic shading",
-    
-    # 3D: Phải là đồ họa máy tính, render, khối nổi
     "3D": "3d computer graphics, blender render, c4d, unreal engine, volumetric lighting, plastic material",
-    
-    # Realism: Phải là ảnh chụp thật
     "Realism": "real life photography, 4k photo, raw camera image, hyperrealistic skin texture, dslr",
-    
-    # Anime: Đặc trưng truyện tranh Nhật
     "Animeart": "anime style, japanese manga, cel shading, 2d character design, waifu",
-    
-    # Cinematic: Ánh sáng điện ảnh, giống phim
     "Cinematic": "cinematic movie scene, dramatic lighting, film grain, wide shot, movie poster style",
-    
-    # Digital Art: Vẽ trên máy tính (Wacom)
     "Digitalart": "digital painting, wacom tablet drawing, highly detailed concept art, artstation style",
-    
-    # Pixel Art: Ô vuông
     "Pixelart": "pixel art, 8-bit, 16-bit, dot matrix, blocky edges, retro game",
-    
-    # Vangogh: Nét cọ sơn dầu
     "Vangoghart": "vincent van gogh style, oil painting, thick brush strokes, impressionism, starry night",
-    
-    # Cyberpunk: Đèn Neon + Công nghệ cao
     "Cyberpunk": "cyberpunk city, neon lights, high tech low life, futuristic sci-fi, cyborg",
-    
-    # Lofi: Chill, nét mềm, hoạt hình retro
     "Lofi": "lofi hip hop style, chill vibes, retro anime aesthetic, study girl, soft lighting",
-    
-    # Vintage: Màu cũ, nhiễu hạt
     "Vintage": "vintage retro style, sepia tone, old photograph, film grain, noise, 1980s",
-    
-    # Horror: Tối tăm, đáng sợ
     "Horror": "horror theme, scary, creepy, dark nightmare, monster, gore, blood",
-    
-    # Minimalism: Ít chi tiết
     "Minimalism": "minimalism, simple clean lines, minimal art, negative space, simple background",
-    
-    # Cute: Dễ thương, tròn trịa
     "Cute": "cute kawaii, chibi style, adorable character, soft shapes, pastel vibe",
-    
-    # Cool: Thời trang, ngầu (Dành cho Fashion)
     "Cool": "cool stylish fashion, streetwear, edgy vibe, magazine cover, posing",
-    
-    # Aesthetic: Bố cục đẹp, nghệ thuật
     "Aesthetic": "aesthetic artistic composition, beautiful lighting, dreamy atmosphere, tumblr style",
-    
-    # Fantasy: Phép thuật, trung cổ
     "Fantasy": "fantasy art, magic, dungeons and dragons, medieval armor, sword, wizard",
-    
-    # Comic: Nét đậm, truyện tranh Mỹ
     "Comic": "comic book style, bold outlines, pop art, marvel dc style, halftone dots",
-    
-    # Scifi: Vũ trụ, tàu không gian
     "Scifi": "sci-fi, science fiction, outer space, spaceship, alien, futuristic technology"
 }
 
-# 2. COLOR: Định nghĩa dựa trên Vật thể/Quần áo (Đã Fix lỗi Black/Red)
 COLOR_PROMPT_MAP = {
     "Black": "black clothing, black outfit, black object, black fashion, matte black material",
     "White": "white clothing, white outfit, white object, bright white surface",
@@ -173,7 +164,6 @@ def load_ai_engine():
         model, _, preprocess = open_clip.create_model_and_transforms(CONFIG["MODEL_NAME"], pretrained=CONFIG["PRETRAINED"], device=device)
         tokenizer = open_clip.get_tokenizer(CONFIG["MODEL_NAME"])
         
-        # Tạo Vectors từ Map đã định nghĩa
         s_texts = [STYLE_PROMPT_MAP.get(s, f"a {s} style artwork") for s in AI_STYLES]
         c_texts = [COLOR_PROMPT_MAP.get(c, f"dominant color is {c}") for c in AI_COLORS]
         
@@ -210,24 +200,19 @@ def analyze_image(file_obj) -> Dict:
             img_feat = model.encode_image(input_img)
             img_feat /= img_feat.norm(dim=-1, keepdim=True)
             
-        # Tính toán xác suất
         s_probs = (100.0 * img_feat @ s_feat.T).softmax(dim=-1)
         c_probs = (100.0 * img_feat @ c_feat.T).softmax(dim=-1)
         
         s_idx = s_probs.argmax().item()
         c_idx = c_probs.argmax().item()
         
-        # Debug Confidence
         s_score = s_probs[0][s_idx].item() * 100
         c_score = c_probs[0][c_idx].item() * 100
         
         return {
-            "status": "success", "filename": file_obj.name, "image_obj": thumb, 
-            "object": "", 
-            "style": AI_STYLES[s_idx], 
-            "color": AI_COLORS[c_idx], 
-            "confidence_s": f"{s_score:.1f}%",
-            "confidence_c": f"{c_score:.1f}%",
+            "status": "success", "filename": file_obj.name, "image_obj": thumb, "object": "", 
+            "style": AI_STYLES[s_idx], "color": AI_COLORS[c_idx], 
+            "confidence_s": f"{s_score:.1f}%", "confidence_c": f"{c_score:.1f}%",
             "mood": "None", "gender": "None"
         }
     except Exception as e:
@@ -238,8 +223,6 @@ def render_image_card(idx: int, item: Dict, start_num: int):
     with st.container(border=True):
         st.image(item["image_obj"], use_container_width=True)
         st.caption(f"STT: {start_num + idx} | File: {item['filename']}")
-        
-        # Hiển thị độ tin cậy của AI (Rất tốt để debug)
         st.caption(f"🎯 AI: {item['style']} ({item.get('confidence_s','?')}) | {item['color']} ({item.get('confidence_c','?')})")
         
         new_obj = st.text_input("Đối tượng (Object)", value=item["object"], key=f"obj_{idx}", label_visibility="collapsed", placeholder="Nhập tên đối tượng...")
