@@ -3,7 +3,7 @@ import pandas as pd
 from PIL import Image
 import io
 import torch
-import open_clip  # <--- THAY DOI QUAN TRONG
+import open_clip
 import logging
 from typing import List, Tuple, Dict
 
@@ -20,7 +20,7 @@ CLIP_INPUT_SIZE = (224, 224)
 
 # --- 1. THIET LAP GIAO DIEN & CSS (UI/UX) ---
 st.set_page_config(
-    page_title="AI Master V10 - Hashtag Pro",
+    page_title="AI Master V10.1 - Hashtag Pro",
     page_icon="🔮",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -54,7 +54,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🔮 AI MASTER V10 - HASHTAG PRO (OpenCLIP Ver)")
+st.title("🔮 AI MASTER V10.1 - HASHTAG PRO")
 st.markdown("#### Quy trinh toi uu: Object -> Style -> Color -> Mood -> Gender")
 st.markdown("---")
 
@@ -79,19 +79,16 @@ UI_COLORS = ["None"] + AI_COLORS
 UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Lovely", "Funny", "ZenMode"]
 UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
 
-# --- 3. KHOI DONG AI ENGINE (DA SUA DOI CHO OPEN_CLIP) ---
+# --- 3. KHOI DONG AI ENGINE ---
 @st.cache_resource
 def load_engine():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"System running on: {device}")
     
     try:
-        # --- THAY DOI LOGIC LOAD MODEL O DAY ---
-        # Su dung ViT-B-32 pretrained openai tu thu vien open_clip
         model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai', device=device)
         tokenizer = open_clip.get_tokenizer('ViT-B-32')
         
-        # Tao vector cho Style va Color
         s_prompts = [f"a {s} style artwork" for s in AI_STYLES]
         c_prompts = [f"dominant color is {c}" for c in AI_COLORS]
         
@@ -128,14 +125,12 @@ def process_single_image(file_obj) -> Dict:
         thumb = original_img.copy()
         thumb.thumbnail(THUMBNAIL_SIZE)
         
-        # OpenCLIP preprocess input
         input_img = preprocess(original_img).unsqueeze(0).to(device)
         
         with torch.no_grad():
             img_feat = model.encode_image(input_img)
             img_feat /= img_feat.norm(dim=-1, keepdim=True)
             
-        # AI du doan Style va Color
         s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
         c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
         
@@ -162,6 +157,7 @@ def display_image_editor(idx: int, item: Dict, start_num: int):
             
         with c_info:
             st.write(f"**{item['filename']}**")
+            # QUAN TRONG: Lay gia tri tu input cap nhat ngay vao session_state
             new_obj = st.text_input("Object", value=item["object"], key=f"obj_{idx}")
             
             c1, c2 = st.columns(2)
@@ -179,6 +175,7 @@ def display_image_editor(idx: int, item: Dict, start_num: int):
                 curr_gender = item["gender"] if item["gender"] in UI_GENDERS else "None"
                 new_g = st.selectbox("Gender", UI_GENDERS, index=UI_GENDERS.index(curr_gender), key=f"g_{idx}")
 
+        # CAP NHAT DU LIEU (Commit changes)
         st.session_state["results"][idx]["object"] = new_obj
         st.session_state["results"][idx]["style"] = new_s
         st.session_state["results"][idx]["color"] = new_c
@@ -228,53 +225,66 @@ if analyze_btn and uploaded_files:
     status_text.success(f"✅ Xong! Review ben duoi.")
     progress_bar.empty()
 
-# --- 7. EXPORT ---
+# --- 7. EXPORT & DISPLAY (DA TOI UU THU TU) ---
 if st.session_state["results"]:
     st.divider()
-    c1, c2 = st.columns([3, 1])
-    with c1: st.subheader(f"📊 Review ({len(st.session_state['results'])} anh)")
-    with c2:
-        export_data = []
-        for i, item in enumerate(st.session_state["results"]):
-            tags = []
-            if item["object"].strip(): tags.append(item["object"].strip())
-            if item["style"] != "None": tags.append(item["style"])
-            if item["color"] != "None": tags.append(item["color"])
-            if item["mood"] != "None": tags.append(item["mood"])
-            if item["gender"] != "None": tags.append(item["gender"])
-            
-            final_string = ", ".join(tags)
-            
-            export_data.append({
-                "STT": start_idx + i,
-                "Ten file": item["filename"],
-                "Final Prompt": final_string,
-                "Object": item["object"],
-                "Style": item["style"],
-                "Color": item["color"],
-                "Mood": item["mood"],
-                "Gender": item["gender"]
-            })
-            
-        df = pd.DataFrame(export_data)
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
-            worksheet = writer.sheets['Sheet1']
-            worksheet.set_column(0, 0, 5)
-            worksheet.set_column(1, 1, 25)
-            worksheet.set_column(2, 2, 50)
-            
-        st.download_button(
-            label="📥 TAI FILE EXCEL",
-            data=buffer.getvalue(),
-            file_name="hashtags_openclip.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
+    
+    # 1. Tao khung chua cho nut download (De no hien thi o tren cung)
+    download_container = st.container()
+    
+    # 2. Hien thi Editor va Cap nhat Du lieu (Chay truoc de lay data moi nhat)
     cols = st.columns(2)
     for i, item in enumerate(st.session_state["results"]):
         with cols[i % 2]: 
             display_image_editor(i, item, start_idx)
+
+    # 3. Xu ly va Hien thi nut Download (Chay sau cung nhung hien thi o tren cung)
+    with download_container:
+        c1, c2 = st.columns([3, 1])
+        with c1: st.subheader(f"📊 Review ({len(st.session_state['results'])} anh)")
+        with c2:
+            export_data = []
+            for i, item in enumerate(st.session_state["results"]):
+                tags = []
+                # Object duoc lay truc tiep tu session_state da cap nhat
+                obj_text = item["object"].strip()
+                if obj_text: tags.append(obj_text)
+                
+                if item["style"] != "None": tags.append(item["style"])
+                if item["color"] != "None": tags.append(item["color"])
+                if item["mood"] != "None": tags.append(item["mood"])
+                if item["gender"] != "None": tags.append(item["gender"])
+                
+                final_string = ", ".join(tags)
+                
+                export_data.append({
+                    "STT": start_idx + i,
+                    "Ten file": item["filename"],
+                    "Final Prompt": final_string,
+                    "Object": item["object"],
+                    "Style": item["style"],
+                    "Color": item["color"],
+                    "Mood": item["mood"],
+                    "Gender": item["gender"]
+                })
+                
+            df = pd.DataFrame(export_data)
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False)
+                worksheet = writer.sheets['Sheet1']
+                worksheet.set_column(0, 0, 5)
+                worksheet.set_column(1, 1, 25)
+                worksheet.set_column(2, 2, 50)
+                
+            st.download_button(
+                label="📥 TAI FILE EXCEL",
+                data=buffer.getvalue(),
+                file_name="hashtags_final.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+
 elif not uploaded_files:
     st.info("👈 Tai anh len de bat dau.")
