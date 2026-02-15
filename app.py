@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Các giới hạn hệ thống
-MAX_IMAGES = 50                 
+MAX_IMAGES = 50         
 MAX_FILE_SIZE_MB = 10           
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 THUMBNAIL_SIZE = (300, 300)     
@@ -291,3 +291,4 @@ elif not uploaded_files:
         3.  **Xuất Excel** nhanh chóng.
         """)
 requirements như nào
+
