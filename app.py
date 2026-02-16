@@ -1,8 +1,8 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 29.1 (Rate Limit Handling)
-Description: Gemini 2.0 Flash + Auto-Retry & Delay mechanism to avoid 429 Errors.
+Version: 29.0 (Pure Speed)
+Description: Exclusive use of Gemini 2.0 Flash (No Fallback) + SQL Export.
 """
 
 import streamlit as st
@@ -14,7 +14,6 @@ import open_clip
 import logging
 import os
 import json
-import time  # <--- THÊM THƯ VIỆN TIME
 from typing import List, Dict, Union
 
 # --- IMPORT NEW SDK ---
@@ -40,7 +39,7 @@ CONFIG = {
 # --- 2. UI/UX CONFIGURATION ---
 st.set_page_config(
     page_title="Enterprise Content Tagger",
-    page_icon="🛡️",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -73,7 +72,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V29.1 (Stable)** | Gemini 2.0 + Anti-Rate Limit Protection")
+st.markdown("**Phiên bản V29.0 (Pure Speed)** | Powered by `gemini-2.0-flash`")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
@@ -161,7 +160,7 @@ try:
 except Exception as e:
     st.error(f"Lỗi khởi tạo CLIP: {e}"); st.stop()
 
-# --- 5. GEMINI 2.0 LOGIC (RATE LIMIT AVOIDANCE) ---
+# --- 5. GEMINI 2.0 FLASH LOGIC (PURE) ---
 def normalize_response(value: str, allowed_list: List[str]) -> str:
     if not value: return "None"
     value = str(value).strip()
@@ -171,7 +170,7 @@ def normalize_response(value: str, allowed_list: List[str]) -> str:
     return "None"
 
 def analyze_with_gemini(image: Image.Image, api_key: str) -> Dict:
-    """Gọi Gemini 2.0 Flash với cơ chế Retry khi gặp lỗi 429"""
+    """Sử dụng ĐỘC QUYỀN model gemini-2.0-flash"""
     if not api_key: return {"mood": "None", "gender": "None", "object": ""}
     
     try:
@@ -189,43 +188,26 @@ def analyze_with_gemini(image: Image.Image, api_key: str) -> Dict:
 
         prompt = "Analyze image. Return JSON with 'mood', 'gender', 'object' (max 3 words)."
 
-        # --- RETRY LOGIC (QUAN TRỌNG) ---
-        max_retries = 3
-        retry_delay = 5  # Giây (Ban đầu)
-
-        for attempt in range(max_retries):
-            try:
-                response = client.models.generate_content(
-                    model='gemini-2.0-flash', 
-                    contents=[image, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=response_schema,
-                        temperature=0.1
-                    )
-                )
-                
-                data = json.loads(response.text)
-                return {
-                    "mood": normalize_response(data.get("mood"), UI_MOODS),
-                    "gender": normalize_response(data.get("gender"), UI_GENDERS),
-                    "object": data.get("object", "")
-                }
-            
-            except Exception as e:
-                # Nếu gặp lỗi 429 (Resource Exhausted) hoặc lỗi khác
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    # logger.warning(f"Rate Limit Hit! Waiting {retry_delay}s... (Attempt {attempt+1})")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Tăng thời gian chờ (Backoff: 5s -> 10s -> 20s)
-                else:
-                    logger.error(f"Gemini Error: {e}")
-                    break # Lỗi khác thì break luôn, không retry
-
-        return {"mood": "None", "gender": "None", "object": ""} # Hết lượt retry thì trả về None
+        # GỌI THẲNG 2.0 FLASH - KHÔNG FALLBACK
+        response = client.models.generate_content(
+            model='gemini-2.0-flash', 
+            contents=[image, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=response_schema,
+                temperature=0.1
+            )
+        )
+        
+        data = json.loads(response.text)
+        return {
+            "mood": normalize_response(data.get("mood"), UI_MOODS),
+            "gender": normalize_response(data.get("gender"), UI_GENDERS),
+            "object": data.get("object", "")
+        }
 
     except Exception as e:
-        logger.error(f"Gemini Client Error: {e}")
+        logger.error(f"Gemini 2.0 Error: {e}")
         return {"mood": "None", "gender": "None", "object": ""}
 
 # --- HYBRID ANALYSIS ---
@@ -250,11 +232,9 @@ def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
         s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
         c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
         
-        # 2. Gemini 2.0 (Cloud) - Có delay nhẹ để giảm tải
+        # 2. Gemini 2.0 (Cloud)
         gemini_res = {"mood": "None", "gender": "None", "object": ""}
-        if gemini_key: 
-            time.sleep(1.5) # Delay 1.5s TRƯỚC khi gọi để tránh spam quá nhanh
-            gemini_res = analyze_with_gemini(original_img, gemini_key)
+        if gemini_key: gemini_res = analyze_with_gemini(original_img, gemini_key)
         
         return {
             "status": "success", "filename": filename, "image_obj": thumb, 
