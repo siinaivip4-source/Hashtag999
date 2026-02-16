@@ -1,8 +1,8 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 21.0 (SQL Integration)
-Description: Support File Upload, Local Scan, Excel & MySQL Export.
+Version: 22.0 (Gemini Hybrid Intelligence)
+Description: CLIP (Style/Color) + Gemini (Mood/Gender) Integration.
 """
 
 import streamlit as st
@@ -13,6 +13,9 @@ import torch
 import open_clip
 import logging
 import os
+import json
+import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import List, Dict, Union
 
 # --- 1. SYSTEM CONFIGURATION ---
@@ -30,7 +33,7 @@ CONFIG = {
 # --- 2. UI/UX CONFIGURATION ---
 st.set_page_config(
     page_title="Enterprise Content Tagger",
-    page_icon="floppy_disk",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -45,16 +48,13 @@ st.markdown("""
     }
     div[data-testid="stImage"] img { border-radius: 4px; object-fit: contain; }
     
-    /* Primary Buttons (Green) */
+    /* Primary Buttons */
     div[data-testid="stButton"] > button[kind="primary"], 
     div[data-testid="stDownloadButton"] > button {
-        background-color: #0f5132 !important; 
-        border-color: #0f5132 !important; 
-        color: white !important; 
-        font-weight: bold;
+        background-color: #0f5132 !important; border-color: #0f5132 !important; color: white !important; font-weight: bold;
     }
 
-    /* Secondary Buttons (White) */
+    /* Secondary Buttons */
     [data-testid="stFileUploader"] button,
     div[data-testid="stButton"] > button[kind="secondary"] {
         background-color: #ffffff !important; color: #333333 !important; border: 1px solid #cccccc !important;
@@ -71,18 +71,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V21.0 (SQL Integration)** | Hỗ trợ Excel & MySQL Export")
+st.markdown("**Phiên bản V22.0 (Gemini Hybrid)** | CLIP (Style/Color) + Gemini (Mood/Gender)")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
 AI_STYLES = ["2D", "3D", "Cute", "Animeart", "Realism", "Aesthetic", "Cool", "Fantasy", "Comic", "Horror", "Cyberpunk", "Lofi", "Minimalism", "Digitalart", "Cinematic", "Pixelart", "Scifi", "Vangoghart"]
 AI_COLORS = ["Black", "White", "Blackandwhite", "Red", "Yellow", "Blue", "Green", "Pink", "Orange", "Pastel", "Hologram", "Vintage", "Colorful", "Neutral", "Light", "Dark", "Warm", "Cold", "Neon", "Gradient", "Purple", "Brown", "Grey"]
-UI_STYLES = ["None"] + AI_STYLES
-UI_COLORS = ["None"] + AI_COLORS
+
+# Danh sách cho Gemini lựa chọn
 UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Lovely", "Funny", "ZenMode"]
 UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
 
-# --- GUARDRAILS ---
+UI_STYLES = ["None"] + AI_STYLES
+UI_COLORS = ["None"] + AI_COLORS
+
+# --- GUARDRAILS (CLIP) ---
 STYLE_PROMPT_MAP = {
     "2D": "flat 2d vector art, simple lines, cartoon illustration, no realistic shading, bold silhouettes, clean outlines, minimalist vector, paper-cut aesthetic, solid color fills",
     "3D": "3d computer graphics, blender render, c4d, unreal engine, volumetric lighting, plastic material, octane render, ray tracing, soft shadows, claymorphism, high-gloss finish",
@@ -131,11 +134,13 @@ COLOR_PROMPT_MAP = {
     "Grey": "grey clothing, concrete wall, silver metal, grey object, ash color, slate stone, gunmetal industrial, misty fog, pewter shine, heathered wool"
 }
 
-# --- 4. CORE ENGINE ---
+# --- 4. CORE ENGINES (CLIP + GEMINI) ---
+
 @st.cache_resource
-def load_ai_engine():
+def load_clip_engine():
+    """Load OpenCLIP for Style/Color"""
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"AI Engine initializing on: {device}")
+    logger.info(f"CLIP Engine on: {device}")
     try:
         model, _, preprocess = open_clip.create_model_and_transforms(CONFIG["MODEL_NAME"], pretrained=CONFIG["PRETRAINED"], device=device)
         tokenizer = open_clip.get_tokenizer(CONFIG["MODEL_NAME"])
@@ -153,17 +158,82 @@ def load_ai_engine():
             c_feat /= c_feat.norm(dim=-1, keepdim=True)
         return model, preprocess, s_feat, c_feat, device
     except Exception as e:
-        logger.error(f"Critical Error: {e}")
+        logger.error(f"CLIP Error: {e}")
         raise e
 
+# Load CLIP
 try:
-    with st.spinner("Đang khởi tạo hệ thống (V21.0 SQL Integration)..."):
-        model, preprocess, s_feat, c_feat, device = load_ai_engine()
+    with st.spinner("Đang khởi tạo CLIP AI (Style & Color)..."):
+        clip_model, clip_preprocess, s_feat, c_feat, device = load_clip_engine()
 except Exception as e:
-    st.error(f"Lỗi khởi tạo: {e}"); st.stop()
+    st.error(f"Lỗi khởi tạo CLIP: {e}"); st.stop()
 
-def analyze_image(file_input: Union[object, str]) -> Dict:
+# GEMINI FUNCTION
+def analyze_with_gemini(image: Image.Image, api_key: str) -> Dict:
+    """
+    Sử dụng Gemini Pro Vision để nhận diện Mood, Gender và Object.
+    """
+    if not api_key:
+        return {"mood": "None", "gender": "None", "object": ""}
+        
     try:
+        genai.configure(api_key=api_key)
+        # Sử dụng model Gemini 1.5 Flash cho tốc độ và giá rẻ, hoặc Pro cho chính xác
+        model = genai.GenerativeModel('gemini-1.5-flash') 
+        
+        prompt = f"""
+        Analyze this image and provide the following details in strict JSON format:
+        1. "mood": Choose ONE from {UI_MOODS} that best describes the emotion/atmosphere. If unclear, choose "None".
+        2. "gender": Choose ONE from {UI_GENDERS} that best describes the main subject. If no person, choose "None".
+        3. "object": A short keyword (max 3 words) describing the main object (e.g., "Girl with bag", "Red car", "Landscape").
+        
+        Example Output:
+        {{
+            "mood": "Happy",
+            "gender": "Female",
+            "object": "Girl smiling"
+        }}
+        """
+        
+        # Cấu hình an toàn để tránh block ảnh người mẫu
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
+        response = model.generate_content([prompt, image], safety_settings=safety_settings)
+        
+        # Parse JSON output
+        try:
+            # Clean response text (đôi khi Gemini trả về ```json ... ```)
+            text = response.text.replace('```json', '').replace('```', '').strip()
+            data = json.loads(text)
+            
+            # Validate output data
+            mood = data.get("mood", "None")
+            if mood not in UI_MOODS: mood = "None"
+            
+            gender = data.get("gender", "None")
+            if gender not in UI_GENDERS: gender = "None"
+            
+            obj = data.get("object", "")
+            
+            return {"mood": mood, "gender": gender, "object": obj}
+            
+        except json.JSONDecodeError:
+            logger.warning(f"Gemini JSON Error: {response.text}")
+            return {"mood": "None", "gender": "None", "object": ""}
+            
+    except Exception as e:
+        logger.error(f"Gemini API Error: {e}")
+        return {"mood": "None", "gender": "None", "object": ""}
+
+# --- FUNCTION: HYBRID ANALYSIS ---
+def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
+    try:
+        # 1. Load Image
         if isinstance(file_input, str):
             filename = os.path.basename(file_input)
             original_img = Image.open(file_input)
@@ -172,81 +242,49 @@ def analyze_image(file_input: Union[object, str]) -> Dict:
             original_img = Image.open(io.BytesIO(file_input.getvalue()))
 
         if original_img.mode != "RGB": original_img = original_img.convert("RGB")
+        
+        # Thumbnail for UI
         thumb = original_img.copy()
         thumb.thumbnail(CONFIG["THUMBNAIL_SIZE"])
-        input_img = preprocess(original_img).unsqueeze(0).to(device)
         
+        # 2. CLIP Analysis (Local - Fast)
+        input_img = clip_preprocess(original_img).unsqueeze(0).to(device)
         with torch.no_grad():
-            img_feat = model.encode_image(input_img)
+            img_feat = clip_model.encode_image(input_img)
             img_feat /= img_feat.norm(dim=-1, keepdim=True)
             
-        s_probs = (100.0 * img_feat @ s_feat.T).softmax(dim=-1)
-        c_probs = (100.0 * img_feat @ c_feat.T).softmax(dim=-1)
+        s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
+        c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
         
-        s_idx = s_probs.argmax().item()
-        c_idx = c_probs.argmax().item()
-        s_score = s_probs[0][s_idx].item() * 100
-        c_score = c_probs[0][c_idx].item() * 100
+        # 3. Gemini Analysis (Cloud - Smart)
+        gemini_res = {"mood": "None", "gender": "None", "object": ""}
+        if gemini_key:
+            gemini_res = analyze_with_gemini(original_img, gemini_key)
         
-        return {"status": "success", "filename": filename, "image_obj": thumb, "object": "", "style": AI_STYLES[s_idx], "color": AI_COLORS[c_idx], "confidence_s": f"{s_score:.1f}%", "confidence_c": f"{c_score:.1f}%", "mood": "None", "gender": "None"}
+        return {
+            "status": "success", 
+            "filename": filename, 
+            "image_obj": thumb, 
+            "object": gemini_res["object"], # Gemini tự điền object luôn
+            "style": AI_STYLES[s_idx], 
+            "color": AI_COLORS[c_idx], 
+            "mood": gemini_res["mood"], 
+            "gender": gemini_res["gender"],
+            "confidence_s": "CLIP", # Đánh dấu nguồn
+            "confidence_c": "CLIP"
+        }
     except Exception as e:
         fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
         return {"status": "error", "filename": fname, "msg": str(e)}
 
-# --- 5. UI COMPONENTS ---
-def render_image_card(idx: int, item: Dict, start_num: int):
-    with st.container(border=True):
-        st.image(item["image_obj"], use_container_width=True)
-        st.caption(f"STT: {start_num + idx} | File: {item['filename']}")
-        st.caption(f"🎯 AI: {item['style']} ({item.get('confidence_s','?')}) | {item['color']} ({item.get('confidence_c','?')})")
-        new_obj = st.text_input("Đối tượng (Object)", value=item["object"], key=f"obj_{idx}", label_visibility="collapsed", placeholder="Nhập tên đối tượng...")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            curr_s = item["style"] if item["style"] in UI_STYLES else "None"
-            new_s = st.selectbox("Style", UI_STYLES, index=UI_STYLES.index(curr_s), key=f"s_{idx}", label_visibility="collapsed")
-            curr_m = item["mood"] if item["mood"] in UI_MOODS else "None"
-            new_m = st.selectbox("Mood", UI_MOODS, index=UI_MOODS.index(curr_m), key=f"m_{idx}", label_visibility="collapsed")
-        with c2:
-            curr_c = item["color"] if item["color"] in UI_COLORS else "None"
-            new_c = st.selectbox("Color", UI_COLORS, index=UI_COLORS.index(curr_c), key=f"c_{idx}", label_visibility="collapsed")
-            curr_g = item["gender"] if item["gender"] in UI_GENDERS else "None"
-            new_g = st.selectbox("Gender", UI_GENDERS, index=UI_GENDERS.index(curr_g), key=f"g_{idx}", label_visibility="collapsed")
-
-        st.session_state["results"][idx].update({"object": new_obj, "style": new_s, "color": new_c, "mood": new_m, "gender": new_g})
-
+# --- SQL GENERATOR ---
 def generate_sql_dump(df: pd.DataFrame, table_name: str = "content_analysis") -> bytes:
-    """
-    Tạo SQL Dump file từ DataFrame
-    """
     sql_lines = []
-    # 1. Tạo bảng (Create Table)
-    sql_lines.append(f"""
---
--- Table structure for table `{table_name}`
---
-CREATE TABLE IF NOT EXISTS `{table_name}` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `hashtag_prompt` text COLLATE utf8mb4_unicode_ci,
-  `object_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `style` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `color` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `mood` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `gender` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-""")
-    
-    # 2. Chèn dữ liệu (Insert Data)
+    sql_lines.append(f"CREATE TABLE IF NOT EXISTS `{table_name}` (`id` int(11) NOT NULL AUTO_INCREMENT, `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL, `hashtag_prompt` text COLLATE utf8mb4_unicode_ci, `object_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `style` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `color` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `mood` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `gender` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;")
     if not df.empty:
-        sql_lines.append(f"-- Dumping data for table `{table_name}`")
         sql_lines.append(f"INSERT INTO `{table_name}` (`file_name`, `hashtag_prompt`, `object_name`, `style`, `color`, `mood`, `gender`) VALUES")
-        
         values = []
         for _, row in df.iterrows():
-            # Escape dấu nháy đơn để tránh lỗi SQL Injection
             f_name = str(row['Tên tập tin']).replace("'", "''")
             h_tag = str(row['Hashtag Tổng hợp']).replace("'", "''")
             obj = str(row['Object']).replace("'", "''")
@@ -254,18 +292,25 @@ CREATE TABLE IF NOT EXISTS `{table_name}` (
             col = str(row['Color']).replace("'", "''")
             mod = str(row['Mood']).replace("'", "''")
             gen = str(row['Gender']).replace("'", "''")
-            
             values.append(f"('{f_name}', '{h_tag}', '{obj}', '{sty}', '{col}', '{mod}', '{gen}')")
-        
         sql_lines.append(",\n".join(values) + ";")
-    
     return "\n".join(sql_lines).encode('utf-8')
 
 # --- 6. SIDEBAR & MAIN LOGIC ---
 with st.sidebar:
     st.header("Cấu hình & Dữ liệu")
+    
+    # --- GEMINI API INPUT ---
+    with st.expander("🔑 Cấu hình Gemini API", expanded=True):
+        gemini_api_key = st.text_input("Nhập Google API Key:", type="password", help="Để bật tính năng tự động Mood & Gender")
+        if not gemini_api_key:
+            st.warning("⚠️ Chưa có Key -> Mood/Gender sẽ là 'None'")
+        else:
+            st.success("✅ Đã kết nối Gemini")
+
     cols_per_row = st.slider("Số cột hiển thị:", 2, 6, 4)
     st.divider()
+    
     st.subheader("Nguồn Dữ Liệu")
     input_method = st.radio("Chọn phương thức:", ["📁 Upload File/Folder", "🖥️ Quét Thư Mục Local"], index=0)
     start_idx = st.number_input("Số thứ tự bắt đầu:", value=1, step=1)
@@ -278,7 +323,6 @@ with st.sidebar:
         if uploaded_files:
             files_to_process = uploaded_files
             st.info(f"Đã chọn: {len(files_to_process)} ảnh")
-            
     else: 
         local_path = st.text_input("Nhập đường dẫn thư mục (VD: D:\Images):")
         if local_path and os.path.isdir(local_path):
@@ -302,10 +346,14 @@ if process_btn and files_to_process:
     processed_results = []
     progress_bar = st.progress(0); status_text = st.empty()
     total = len(files_to_process)
+    
     for i, file_input in enumerate(files_to_process):
         fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
-        status_text.text(f"Đang xử lý: {fname}...")
-        res = analyze_image(file_input)
+        status_text.text(f"Đang xử lý: {fname} (AI Hybrid)...")
+        
+        # Gọi hàm phân tích (Truyền thêm API Key)
+        res = analyze_image(file_input, gemini_key=gemini_api_key)
+        
         if res["status"] == "success": res["id"] = i; processed_results.append(res)
         progress_bar.progress((i+1)/total)
     st.session_state["results"] = processed_results
@@ -316,12 +364,33 @@ if st.session_state["results"]:
     export_container = st.container(); st.divider()
     grid = st.columns(cols_per_row)
     for i, item in enumerate(st.session_state["results"]):
-        with grid[i % cols_per_row]: render_image_card(i, item, start_idx)
+        # Component render UI
+        with grid[i % cols_per_row]:
+            with st.container(border=True):
+                st.image(item["image_obj"], use_container_width=True)
+                st.caption(f"STT: {start_num + idx} | File: {item['filename']}")
+                
+                # Input Object (Gemini có thể đã điền sẵn)
+                new_obj = st.text_input("Object", value=item["object"], key=f"obj_{i}", label_visibility="collapsed", placeholder="Object...")
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    curr_s = item["style"] if item["style"] in UI_STYLES else "None"
+                    new_s = st.selectbox("Style", UI_STYLES, index=UI_STYLES.index(curr_s), key=f"s_{i}", label_visibility="collapsed")
+                    curr_m = item["mood"] if item["mood"] in UI_MOODS else "None"
+                    new_m = st.selectbox("Mood", UI_MOODS, index=UI_MOODS.index(curr_m), key=f"m_{i}", label_visibility="collapsed")
+                with c2:
+                    curr_c = item["color"] if item["color"] in UI_COLORS else "None"
+                    new_c = st.selectbox("Color", UI_COLORS, index=UI_COLORS.index(curr_c), key=f"c_{i}", label_visibility="collapsed")
+                    curr_g = item["gender"] if item["gender"] in UI_GENDERS else "None"
+                    new_g = st.selectbox("Gender", UI_GENDERS, index=UI_GENDERS.index(curr_g), key=f"g_{i}", label_visibility="collapsed")
+
+                st.session_state["results"][i].update({"object": new_obj, "style": new_s, "color": new_c, "mood": new_m, "gender": new_g})
+
     with export_container:
         c1, c2 = st.columns([3, 1])
         with c1: st.subheader(f"Kết quả phân tích ({len(st.session_state['results'])} mục)")
         with c2:
-            # Prepare DataFrame
             export_data = []
             for item in st.session_state["results"]:
                 tags = [t for t in [item["object"].strip(), item["style"], item["color"], item["mood"], item["gender"]] if t and t != "None"]
@@ -331,22 +400,16 @@ if st.session_state["results"]:
                     "Object": item["object"], "Style": item["style"], "Color": item["color"], "Mood": item["mood"], "Gender": item["gender"]
                 })
             df = pd.DataFrame(export_data)
-
-            # Export Button Group
-            col_xls, col_sql = st.columns(2)
             
-            # 1. EXCEL EXPORT
+            col_xls, col_sql = st.columns(2)
             with col_xls:
                 buffer_xls = io.BytesIO()
                 with pd.ExcelWriter(buffer_xls, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name='Data')
-                    worksheet = writer.sheets['Data']
-                    worksheet.set_column('A:A', 5); worksheet.set_column('B:B', 25); worksheet.set_column('C:C', 50)
-                st.download_button("📥 TẢI EXCEL (.xlsx)", buffer_xls.getvalue(), "Report_V21.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            
-            # 2. MYSQL EXPORT
+                    worksheet = writer.sheets['Data']; worksheet.set_column('A:A', 5); worksheet.set_column('B:B', 25); worksheet.set_column('C:C', 50)
+                st.download_button("📥 TẢI EXCEL", buffer_xls.getvalue(), "Report_V22.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
             with col_sql:
                 sql_bytes = generate_sql_dump(df)
-                st.download_button("🗄️ TẢI MYSQL (.sql)", sql_bytes, "Database_Dump_V21.sql", "text/plain", use_container_width=True)
+                st.download_button("🗄️ TẢI MYSQL", sql_bytes, "Database_Dump_V22.sql", "text/plain", use_container_width=True)
 
 elif not files_to_process: st.info("Hệ thống sẵn sàng. Vui lòng chọn nguồn dữ liệu.")
