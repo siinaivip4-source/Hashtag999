@@ -1,8 +1,8 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 24.0 (Compatibility Mode)
-Description: CLIP + Gemini (Auto-Fallback Models) + SQL Export.
+Version: 25.0 (Dynamic Model Discovery)
+Description: CLIP + Gemini (Auto-Detect Available Models) + SQL Export.
 """
 
 import streamlit as st
@@ -66,7 +66,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V24.0 (Compatibility Mode)** | CLIP + Gemini (Auto-Fallback)")
+st.markdown("**Phiên bản V25.0 (Dynamic Discovery)** | CLIP + Gemini (Auto-Detect)")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
@@ -163,42 +163,66 @@ def normalize_response(value: str, allowed_list: List[str]) -> str:
         if value.lower() == item.lower(): return item
     return "None"
 
+def get_best_available_model():
+    """Tự động tìm model tốt nhất mà API Key hỗ trợ"""
+    try:
+        # Danh sách ưu tiên
+        priority_models = [
+            'gemini-1.5-flash',
+            'gemini-1.5-pro',
+            'gemini-1.0-pro-vision', # Tên chuẩn cũ
+            'gemini-pro-vision',     # Tên alias cũ
+        ]
+        
+        # Lấy danh sách model thực tế từ Google
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        # So khớp
+        for model_name in priority_models:
+            # Check if model name or models/model_name exists
+            if model_name in available_models or f"models/{model_name}" in available_models:
+                return model_name
+        
+        # Nếu không tìm thấy cái nào trong list ưu tiên, lấy cái vision đầu tiên
+        for m in genai.list_models():
+             if 'generateContent' in m.supported_generation_methods and 'vision' in m.name:
+                 return m.name
+
+        return 'gemini-1.5-flash' # Fallback cứng nếu list_models thất bại
+    except Exception as e:
+        logger.error(f"List Models Error: {e}")
+        return 'gemini-pro-vision' # Fallback an toàn nhất cho bản cũ
+
 def analyze_with_gemini(image: Image.Image, api_key: str) -> Dict:
     if not api_key: return {"mood": "None", "gender": "None", "object": ""}
     
     genai.configure(api_key=api_key)
     
-    # FALLBACK LOGIC: Thu Flash -> Pro -> Vision
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro-vision']
-    model = None
+    # CHIẾN THUẬT MỚI: Tự động tìm tên model đúng
+    model_name = get_best_available_model()
+    # logger.info(f"Selected Gemini Model: {model_name}") 
     
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            # Test thu model 
-            break
-        except Exception:
-            continue
-            
-    # Neu van khong load duoc model nao thi dung mac dinh
-    if not model: model = genai.GenerativeModel('gemini-1.5-flash-latest')
-
-    prompt = f"""
-    Analyze this image and return a JSON object with keys: "mood", "gender", "object".
-    - "mood": One of {UI_MOODS}. If unclear, use "None".
-    - "gender": One of {UI_GENDERS}. If no person, use "None".
-    - "object": Main object name (max 3 words).
-    Output ONLY valid JSON.
-    """
-    
-    safety_settings = {
-        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-    }
-
     try:
+        model = genai.GenerativeModel(model_name)
+        
+        prompt = f"""
+        Analyze this image and return a JSON object with keys: "mood", "gender", "object".
+        - "mood": One of {UI_MOODS}. If unclear, use "None".
+        - "gender": One of {UI_GENDERS}. If no person, use "None".
+        - "object": Main object name (max 3 words).
+        Output ONLY valid JSON.
+        """
+        
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
         response = model.generate_content([prompt, image], safety_settings=safety_settings)
         text = response.text.replace('```json', '').replace('```', '').strip()
         data = json.loads(text)
@@ -332,31 +356,4 @@ if st.session_state["results"]:
                     curr_c = item["color"] if item["color"] in UI_COLORS else "None"
                     new_c = st.selectbox("Color", UI_COLORS, index=UI_COLORS.index(curr_c), key=f"c_{i}", label_visibility="collapsed")
                     curr_g = item["gender"] if item["gender"] in UI_GENDERS else "None"
-                    new_g = st.selectbox("Gender", UI_GENDERS, index=UI_GENDERS.index(curr_g), key=f"g_{i}", label_visibility="collapsed")
-                st.session_state["results"][i].update({"object": new_obj, "style": new_s, "color": new_c, "mood": new_m, "gender": new_g})
-
-    with export_container:
-        c1, c2 = st.columns([3, 1])
-        with c1: st.subheader(f"Kết quả phân tích ({len(st.session_state['results'])} mục)")
-        with c2:
-            export_data = []
-            for item in st.session_state["results"]:
-                tags = [t for t in [item["object"].strip(), item["style"], item["color"], item["mood"], item["gender"]] if t and t != "None"]
-                export_data.append({
-                    "STT": start_idx + st.session_state["results"].index(item),
-                    "Tên tập tin": item["filename"], "Hashtag Tổng hợp": ", ".join(tags),
-                    "Object": item["object"], "Style": item["style"], "Color": item["color"], "Mood": item["mood"], "Gender": item["gender"]
-                })
-            df = pd.DataFrame(export_data)
-            col_xls, col_sql = st.columns(2)
-            with col_xls:
-                buffer_xls = io.BytesIO()
-                with pd.ExcelWriter(buffer_xls, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Data')
-                    worksheet = writer.sheets['Data']; worksheet.set_column('A:A', 5); worksheet.set_column('B:B', 25); worksheet.set_column('C:C', 50)
-                st.download_button("📥 TẢI EXCEL", buffer_xls.getvalue(), "Report_V24.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            with col_sql:
-                sql_bytes = generate_sql_dump(df)
-                st.download_button("🗄️ TẢI MYSQL", sql_bytes, "Database_V24.sql", "text/plain", use_container_width=True)
-
-elif not files_to_process: st.info("Hệ thống sẵn sàng. Vui lòng chọn nguồn dữ liệu.")
+                    new_g = st.selectbox("Gender", UI_GENDERS, index=UI_GENDERS.index(curr_g), key=f"g
