@@ -1,8 +1,8 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 25.1 (Syntax Fixed)
-Description: CLIP + Gemini (Dynamic Model) + SQL Export.
+Version: 26.0 (Next Gen SDK)
+Description: Migrated to new 'google-genai' SDK for Gemini 1.5 Flash support.
 """
 
 import streamlit as st
@@ -14,9 +14,15 @@ import open_clip
 import logging
 import os
 import json
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import List, Dict, Union
+
+# --- IMPORT NEW SDK (Google Gen AI) ---
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    st.error("⚠️ Lỗi thư viện: Vui lòng cập nhật file requirements.txt thành 'google-genai' (bỏ 'google-generativeai') và Reboot App.")
+    st.stop()
 
 # --- 1. SYSTEM CONFIGURATION ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
@@ -33,7 +39,7 @@ CONFIG = {
 # --- 2. UI/UX CONFIGURATION ---
 st.set_page_config(
     page_title="Enterprise Content Tagger",
-    page_icon="🛡️",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -66,7 +72,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V25.1 (Syntax Fix)** | CLIP + Gemini (Auto-Detect)")
+st.markdown("**Phiên bản V26.0 (Next Gen SDK)** | Powered by `google-genai` Library")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
@@ -77,7 +83,7 @@ UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
 UI_STYLES = ["None"] + AI_STYLES
 UI_COLORS = ["None"] + AI_COLORS
 
-# --- GUARDRAILS ---
+# --- GUARDRAILS (CLIP) ---
 STYLE_PROMPT_MAP = {
     "2D": "flat 2d vector art, simple lines, cartoon illustration, no realistic shading, bold silhouettes, clean outlines, minimalist vector, paper-cut aesthetic, solid color fills",
     "3D": "3d computer graphics, blender render, c4d, unreal engine, volumetric lighting, plastic material, octane render, ray tracing, soft shadows, claymorphism, high-gloss finish",
@@ -126,8 +132,7 @@ COLOR_PROMPT_MAP = {
     "Grey": "grey clothing, concrete wall, silver metal, grey object, ash color, slate stone, gunmetal industrial, misty fog, pewter shine, heathered wool"
 }
 
-# --- 4. CORE ENGINES ---
-
+# --- 4. CORE ENGINES (CLIP) ---
 @st.cache_resource
 def load_clip_engine():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -155,69 +160,65 @@ try:
 except Exception as e:
     st.error(f"Lỗi khởi tạo CLIP: {e}"); st.stop()
 
+# --- 5. GEMINI NEW SDK LOGIC ---
 def normalize_response(value: str, allowed_list: List[str]) -> str:
     if not value: return "None"
-    value = value.strip()
+    value = str(value).strip()
     if value in allowed_list: return value
     for item in allowed_list:
         if value.lower() == item.lower(): return item
     return "None"
 
-def get_best_available_model():
-    try:
-        priority_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro-vision', 'gemini-pro-vision']
-        available_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        for model_name in priority_models:
-            if model_name in available_models or f"models/{model_name}" in available_models:
-                return model_name
-        
-        for m in genai.list_models():
-             if 'generateContent' in m.supported_generation_methods and 'vision' in m.name:
-                 return m.name
-        return 'gemini-1.5-flash'
-    except Exception as e:
-        logger.error(f"List Models Error: {e}")
-        return 'gemini-pro-vision'
-
 def analyze_with_gemini(image: Image.Image, api_key: str) -> Dict:
+    """Sử dụng SDK google-genai mới nhất"""
     if not api_key: return {"mood": "None", "gender": "None", "object": ""}
     
-    genai.configure(api_key=api_key)
-    model_name = get_best_available_model()
-    
     try:
-        model = genai.GenerativeModel(model_name)
-        prompt = f"""
-        Analyze this image and return a JSON object with keys: "mood", "gender", "object".
-        - "mood": One of {UI_MOODS}. If unclear, use "None".
-        - "gender": One of {UI_GENDERS}. If no person, use "None".
-        - "object": Main object name (max 3 words).
-        Output ONLY valid JSON.
-        """
+        # Khởi tạo Client theo chuẩn mới
+        client = genai.Client(api_key=api_key)
         
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        # Định nghĩa Schema đầu ra (JSON Schema Enforcement)
+        # Đây là tính năng mạnh nhất của bản mới, ép AI trả về đúng khuôn mẫu
+        response_schema = {
+            "type": "OBJECT",
+            "properties": {
+                "mood": {"type": "STRING", "enum": UI_MOODS},
+                "gender": {"type": "STRING", "enum": UI_GENDERS},
+                "object": {"type": "STRING"}
+            },
+            "required": ["mood", "gender", "object"]
         }
 
-        response = model.generate_content([prompt, image], safety_settings=safety_settings)
-        text = response.text.replace('```json', '').replace('```', '').strip()
-        data = json.loads(text)
+        # Prompt đơn giản hơn vì đã có Schema
+        prompt = "Analyze the image. Identify the main object (max 3 words), the mood of the scene, and the gender of the main subject (if any)."
+
+        # Gọi API với config JSON
+        response = client.models.generate_content(
+            model='gemini-1.5-flash', # Model này chắc chắn có trong SDK mới
+            contents=[image, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=response_schema,
+                temperature=0.1 # Giảm sáng tạo để tăng chính xác
+            )
+        )
         
+        # Parse kết quả (SDK mới trả về text là JSON chuẩn)
+        data = json.loads(response.text)
+        
+        # Lấy dữ liệu
         mood = normalize_response(data.get("mood"), UI_MOODS)
         gender = normalize_response(data.get("gender"), UI_GENDERS)
         obj = data.get("object", "")
+        
         return {"mood": mood, "gender": gender, "object": obj}
+
     except Exception as e:
-        logger.error(f"Gemini Error ({model_name}): {e}")
+        logger.error(f"Gemini SDK Error: {e}")
+        # Fallback thủ công nếu Flash bị chặn vùng
         return {"mood": "None", "gender": "None", "object": ""}
 
+# --- HYBRID ANALYSIS ---
 def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
     try:
         if isinstance(file_input, str):
@@ -231,7 +232,7 @@ def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
         thumb = original_img.copy()
         thumb.thumbnail(CONFIG["THUMBNAIL_SIZE"])
         
-        # CLIP
+        # 1. CLIP (Local)
         input_img = clip_preprocess(original_img).unsqueeze(0).to(device)
         with torch.no_grad():
             img_feat = clip_model.encode_image(input_img)
@@ -239,7 +240,7 @@ def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
         s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
         c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
         
-        # Gemini
+        # 2. Gemini (Cloud)
         gemini_res = {"mood": "None", "gender": "None", "object": ""}
         if gemini_key: gemini_res = analyze_with_gemini(original_img, gemini_key)
         
@@ -254,6 +255,7 @@ def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
         fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
         return {"status": "error", "filename": fname, "msg": str(e)}
 
+# --- SQL GENERATOR ---
 def generate_sql_dump(df: pd.DataFrame, table_name: str = "content_analysis") -> bytes:
     sql_lines = []
     sql_lines.append(f"CREATE TABLE IF NOT EXISTS `{table_name}` (`id` int(11) NOT NULL AUTO_INCREMENT, `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL, `hashtag_prompt` text COLLATE utf8mb4_unicode_ci, `object_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `style` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `color` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `mood` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `gender` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;")
@@ -272,12 +274,12 @@ def generate_sql_dump(df: pd.DataFrame, table_name: str = "content_analysis") ->
         sql_lines.append(",\n".join(values) + ";")
     return "\n".join(sql_lines).encode('utf-8')
 
-# --- 6. UI ---
+# --- 6. SIDEBAR & MAIN LOGIC ---
 with st.sidebar:
     st.header("Cấu hình & Dữ liệu")
     with st.expander("🔑 Cấu hình Gemini API", expanded=True):
         gemini_api_key = st.text_input("Nhập Google API Key:", type="password")
-        if gemini_api_key: st.success("✅ Đã kết nối")
+        if gemini_api_key: st.success("✅ Đã kết nối (New SDK)")
         else: st.warning("⚠️ Chưa có Key")
     cols_per_row = st.slider("Số cột:", 2, 6, 4)
     st.divider()
@@ -329,7 +331,6 @@ if st.session_state["results"]:
                 st.image(item["image_obj"], use_container_width=True)
                 st.caption(f"STT: {start_idx + i} | File: {item['filename']}")
                 
-                # --- [FIXED SECTION] ---
                 new_obj = st.text_input(
                     "Object", 
                     value=item["object"], 
@@ -348,7 +349,6 @@ if st.session_state["results"]:
                         key=f"s_{i}", 
                         label_visibility="collapsed"
                     )
-                    
                     curr_m = item["mood"] if item["mood"] in UI_MOODS else "None"
                     new_m = st.selectbox(
                         "Mood", 
@@ -357,7 +357,6 @@ if st.session_state["results"]:
                         key=f"m_{i}", 
                         label_visibility="collapsed"
                     )
-                    
                 with c2:
                     curr_c = item["color"] if item["color"] in UI_COLORS else "None"
                     new_c = st.selectbox(
@@ -367,7 +366,6 @@ if st.session_state["results"]:
                         key=f"c_{i}", 
                         label_visibility="collapsed"
                     )
-                    
                     curr_g = item["gender"] if item["gender"] in UI_GENDERS else "None"
                     new_g = st.selectbox(
                         "Gender", 
@@ -376,7 +374,6 @@ if st.session_state["results"]:
                         key=f"g_{i}", 
                         label_visibility="collapsed"
                     )
-                # --- [END FIXED SECTION] ---
                 
                 st.session_state["results"][i].update({
                     "object": new_obj, 
@@ -405,9 +402,9 @@ if st.session_state["results"]:
                 with pd.ExcelWriter(buffer_xls, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name='Data')
                     worksheet = writer.sheets['Data']; worksheet.set_column('A:A', 5); worksheet.set_column('B:B', 25); worksheet.set_column('C:C', 50)
-                st.download_button("📥 TẢI EXCEL", buffer_xls.getvalue(), "Report_V25_1.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                st.download_button("📥 TẢI EXCEL", buffer_xls.getvalue(), "Report_V26.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
             with col_sql:
                 sql_bytes = generate_sql_dump(df)
-                st.download_button("🗄️ TẢI MYSQL", sql_bytes, "Database_V25_1.sql", "text/plain", use_container_width=True)
+                st.download_button("🗄️ TẢI MYSQL", sql_bytes, "Database_V26.sql", "text/plain", use_container_width=True)
 
 elif not files_to_process: st.info("Hệ thống sẵn sàng. Vui lòng chọn nguồn dữ liệu.")
