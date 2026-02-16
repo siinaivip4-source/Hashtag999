@@ -10,7 +10,4 @@ torchvision>=0.15.0
 setuptools>=65.0
 wheel
 open-clip-torch
-google-generativeai
-
-
-
+google-genai
