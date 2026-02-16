@@ -1,7 +1,7 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
 Developed by: [SiinNoBox Team]
-Version: 20.0 (Hybrid Input Edition)
+Version: 20.1 (Fix NameError)
 Description: Support both File Upload & Local Folder Scan.
 """
 
@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - 
 logger = logging.getLogger(__name__)
 
 CONFIG = {
-    "MAX_IMAGES": 1000, # Tăng giới hạn cho chế độ Folder
+    "MAX_IMAGES": 1000,
     "THUMBNAIL_SIZE": (300, 600),
     "CLIP_INPUT_SIZE": (224, 224),
     "MODEL_NAME": "ViT-B-32",
@@ -35,47 +35,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS: UI Perfected + Local Path Input Styling
+# Custom CSS
 st.markdown("""
     <style>
-    /* 1. General */
     .main { background-color: #ffffff; }
     h1, h2, h3, p, div { font-family: 'Segoe UI', sans-serif; }
-
-    /* 2. Cards */
     div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
         background-color: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e9ecef;
     }
     div[data-testid="stImage"] img { border-radius: 4px; object-fit: contain; }
-
-    /* 3. Primary Buttons (Green) */
-    div[data-testid="stButton"] > button[kind="primary"], 
-    div[data-testid="stDownloadButton"] > button {
-        background-color: #0f5132 !important; 
-        border-color: #0f5132 !important; 
-        color: white !important; 
-        font-weight: bold;
+    div[data-testid="stButton"] > button[kind="primary"], div[data-testid="stDownloadButton"] > button {
+        background-color: #0f5132 !important; border-color: #0f5132 !important; color: white !important; font-weight: bold;
     }
-
-    /* 4. Secondary/Input Elements (White) */
     [data-testid="stFileUploader"] button {
         background-color: #ffffff !important; color: #333333 !important; border: 1px solid #cccccc !important;
     }
     div[data-testid="stButton"] > button[kind="secondary"] {
         background-color: #ffffff !important; color: #333333 !important; border: 1px solid #cccccc !important;
     }
-    
-    /* 5. Input Text for Path */
-    div[data-testid="stTextInput"] input {
-        background-color: #ffffff !important;
-        border: 1px solid #cccccc !important;
-        color: #333333 !important;
-    }
-
-    /* 6. Sidebar Fix */
     [data-testid="stSidebarCollapsedControl"] {
-        display: block !important; z-index: 1000000 !important;
-        color: #0f5132 !important; background-color: white !important;
+        display: block !important; z-index: 1000000 !important; color: #0f5132 !important; background-color: white !important;
     }
     section[data-testid="stSidebar"] button {
         display: block !important; visibility: visible !important; opacity: 1 !important;
@@ -84,23 +63,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V20.0 (Hybrid Input)** | Hỗ trợ Upload & Quét Thư Mục Local")
+st.markdown("**Phiên bản V20.1 (Fix NameError)** | Hỗ trợ Upload & Quét Thư Mục Local")
 st.divider()
 
 # --- 3. DATA DICTIONARIES ---
-AI_STYLES = [
-    "2D", "3D", "Cute", "Animeart", "Realism",
-    "Aesthetic", "Cool", "Fantasy", "Comic", "Horror",
-    "Cyberpunk", "Lofi", "Minimalism", "Digitalart", "Cinematic",
-    "Pixelart", "Scifi", "Vangoghart"
-]
-AI_COLORS = [
-    "Black", "White", "Blackandwhite", "Red", "Yellow",
-    "Blue", "Green", "Pink", "Orange", "Pastel",
-    "Hologram", "Vintage", "Colorful", "Neutral", "Light",
-    "Dark", "Warm", "Cold", "Neon", "Gradient",
-    "Purple", "Brown", "Grey"
-]
+AI_STYLES = ["2D", "3D", "Cute", "Animeart", "Realism", "Aesthetic", "Cool", "Fantasy", "Comic", "Horror", "Cyberpunk", "Lofi", "Minimalism", "Digitalart", "Cinematic", "Pixelart", "Scifi", "Vangoghart"]
+AI_COLORS = ["Black", "White", "Blackandwhite", "Red", "Yellow", "Blue", "Green", "Pink", "Orange", "Pastel", "Hologram", "Vintage", "Colorful", "Neutral", "Light", "Dark", "Warm", "Cold", "Neon", "Gradient", "Purple", "Brown", "Grey"]
 UI_STYLES = ["None"] + AI_STYLES
 UI_COLORS = ["None"] + AI_COLORS
 UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Lovely", "Funny", "ZenMode"]
@@ -181,31 +149,26 @@ def load_ai_engine():
         raise e
 
 try:
-    with st.spinner("Đang khởi tạo hệ thống (V20 Hybrid Input)..."):
+    with st.spinner("Đang khởi tạo hệ thống (V20.1 Stable)..."):
         model, preprocess, s_feat, c_feat, device = load_ai_engine()
 except Exception as e:
     st.error(f"Lỗi khởi tạo: {e}"); st.stop()
 
 # --- FUNCTION: IMAGE ANALYSIS ---
 def analyze_image(file_input: Union[object, str]) -> Dict:
-    """
-    Xử lý ảnh từ UploadedFile (Bytes) HOẶC Local Path (String)
-    """
     try:
-        # Check input type
-        if isinstance(file_input, str): # Local Path
+        if isinstance(file_input, str):
             filename = os.path.basename(file_input)
             original_img = Image.open(file_input)
-        else: # UploadedFile
+        else:
             filename = file_input.name
             original_img = Image.open(io.BytesIO(file_input.getvalue()))
 
         if original_img.mode != "RGB": original_img = original_img.convert("RGB")
-        
         thumb = original_img.copy()
         thumb.thumbnail(CONFIG["THUMBNAIL_SIZE"])
-        
         input_img = preprocess(original_img).unsqueeze(0).to(device)
+        
         with torch.no_grad():
             img_feat = model.encode_image(input_img)
             img_feat /= img_feat.norm(dim=-1, keepdim=True)
@@ -218,12 +181,7 @@ def analyze_image(file_input: Union[object, str]) -> Dict:
         s_score = s_probs[0][s_idx].item() * 100
         c_score = c_probs[0][c_idx].item() * 100
         
-        return {
-            "status": "success", "filename": filename, "image_obj": thumb, "object": "", 
-            "style": AI_STYLES[s_idx], "color": AI_COLORS[c_idx], 
-            "confidence_s": f"{s_score:.1f}%", "confidence_c": f"{c_score:.1f}%",
-            "mood": "None", "gender": "None"
-        }
+        return {"status": "success", "filename": filename, "image_obj": thumb, "object": "", "style": AI_STYLES[s_idx], "color": AI_COLORS[c_idx], "confidence_s": f"{s_score:.1f}%", "confidence_c": f"{c_score:.1f}%", "mood": "None", "gender": "None"}
     except Exception as e:
         fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
         return {"status": "error", "filename": fname, "msg": str(e)}
@@ -234,7 +192,6 @@ def render_image_card(idx: int, item: Dict, start_num: int):
         st.image(item["image_obj"], use_container_width=True)
         st.caption(f"STT: {start_num + idx} | File: {item['filename']}")
         st.caption(f"🎯 AI: {item['style']} ({item.get('confidence_s','?')}) | {item['color']} ({item.get('confidence_c','?')})")
-        
         new_obj = st.text_input("Đối tượng (Object)", value=item["object"], key=f"obj_{idx}", label_visibility="collapsed", placeholder="Nhập tên đối tượng...")
         
         c1, c2 = st.columns(2)
@@ -258,12 +215,11 @@ with st.sidebar:
     st.divider()
     
     st.subheader("Nguồn Dữ Liệu")
-    # TÙY CHỌN NGUỒN DỮ LIỆU
     input_method = st.radio("Chọn phương thức:", ["📁 Upload File/Folder", "🖥️ Quét Thư Mục Local"], index=0)
-    
     start_idx = st.number_input("Số thứ tự bắt đầu:", value=1, step=1)
     
     files_to_process = []
+    uploaded_files = [] # <--- KHỞI TẠO BIẾN Ở ĐÂY ĐỂ TRÁNH NAME ERROR
     
     if input_method == "📁 Upload File/Folder":
         uploaded_files = st.file_uploader(f"Kéo thả ảnh vào đây:", type=['png','jpg','jpeg','webp'], accept_multiple_files=True)
@@ -291,20 +247,15 @@ if "results" not in st.session_state: st.session_state["results"] = []
 
 if process_btn and files_to_process:
     if len(files_to_process) > CONFIG["MAX_IMAGES"]: st.error("Quá giới hạn ảnh."); st.stop()
-    
     processed_results = []
     progress_bar = st.progress(0); status_text = st.empty()
     total = len(files_to_process)
-    
     for i, file_input in enumerate(files_to_process):
-        # file_input co the la UploadedFile hoac String path
         fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
         status_text.text(f"Đang xử lý: {fname}...")
-        
         res = analyze_image(file_input)
         if res["status"] == "success": res["id"] = i; processed_results.append(res)
         progress_bar.progress((i+1)/total)
-        
     st.session_state["results"] = processed_results
     status_text.success("Xử lý hoàn tất."); progress_bar.empty()
 
@@ -314,7 +265,6 @@ if st.session_state["results"]:
     grid = st.columns(cols_per_row)
     for i, item in enumerate(st.session_state["results"]):
         with grid[i % cols_per_row]: render_image_card(i, item, start_idx)
-            
     with export_container:
         c1, c2 = st.columns([3, 1])
         with c1: st.subheader(f"Kết quả phân tích ({len(st.session_state['results'])} mục)")
@@ -333,5 +283,5 @@ if st.session_state["results"]:
                 df.to_excel(writer, index=False, sheet_name='Data')
                 worksheet = writer.sheets['Data']
                 worksheet.set_column('A:A', 5); worksheet.set_column('B:B', 25); worksheet.set_column('C:C', 50)
-            st.download_button("📥 XUẤT BÁO CÁO EXCEL", buffer.getvalue(), "Analysed_Report_V20.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-elif not files_to_process and not uploaded_files: st.info("Hệ thống sẵn sàng. Vui lòng chọn nguồn dữ liệu.")
+            st.download_button("📥 XUẤT BÁO CÁO EXCEL", buffer.getvalue(), "Analysed_Report_V20_1.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+elif not files_to_process: st.info("Hệ thống sẵn sàng. Vui lòng chọn nguồn dữ liệu.")
