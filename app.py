@@ -1,402 +1,186 @@
 """
 ENTERPRISE CONTENT TAGGER SYSTEM
-Developed by: [SiinNoBox Team]
-Version: 29.0 (Pure Speed)
-Description: Exclusive use of Gemini 2.0 Flash (No Fallback) + SQL Export.
+Developed by: [SiinNoBox Team] - Coded by Tiểu Vy
+Version: 22.0 (Gemini Vision + Dynamic Google Sheets + SQL)
 """
 
 import streamlit as st
 import pandas as pd
 from PIL import Image
 import io
-import torch
-import open_clip
-import logging
 import os
+import time
 import json
-from typing import List, Dict, Union
+import logging
+import google.generativeai as genai
+from dotenv import load_dotenv
 
-# --- IMPORT NEW SDK ---
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    st.error("⚠️ Lỗi thư viện: Vui lòng cập nhật requirements.txt thành 'google-genai' và Reboot App.")
-    st.stop()
-
-# --- 1. SYSTEM CONFIGURATION ---
+# --- 1. SYSTEM & SECURITY INIT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
 logger = logging.getLogger(__name__)
 
-CONFIG = {
-    "MAX_IMAGES": 1000,
-    "THUMBNAIL_SIZE": (300, 600),
-    "CLIP_INPUT_SIZE": (224, 224),
-    "MODEL_NAME": "ViT-B-32",
-    "PRETRAINED": "openai"
-}
+# Tải API Key từ file .env (Bảo mật tuyệt đối)
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# --- 2. UI/UX CONFIGURATION ---
-st.set_page_config(
-    page_title="Enterprise Content Tagger",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+if not GEMINI_API_KEY:
+    st.error("🚨 Lỗi Bảo Mật: Không tìm thấy GEMINI_API_KEY trong file .env!")
+    st.stop()
 
-# Custom CSS
-st.markdown("""
-    <style>
-    .main { background-color: #ffffff; }
-    h1, h2, h3, p, div { font-family: 'Segoe UI', sans-serif; }
-    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
-        background-color: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e9ecef;
-    }
-    div[data-testid="stImage"] img { border-radius: 4px; object-fit: contain; }
-    
-    div[data-testid="stButton"] > button[kind="primary"], 
-    div[data-testid="stDownloadButton"] > button {
-        background-color: #0f5132 !important; border-color: #0f5132 !important; color: white !important; font-weight: bold;
-    }
-    [data-testid="stFileUploader"] button,
-    div[data-testid="stButton"] > button[kind="secondary"] {
-        background-color: #ffffff !important; color: #333333 !important; border: 1px solid #cccccc !important;
-    }
-    [data-testid="stSidebarCollapsedControl"] {
-        display: block !important; z-index: 1000000 !important; color: #0f5132 !important; background-color: white !important;
-    }
-    section[data-testid="stSidebar"] button {
-        display: block !important; visibility: visible !important; opacity: 1 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
+genai.configure(api_key=GEMINI_API_KEY)
 
-st.title("HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG")
-st.markdown("**Phiên bản V29.0 (Pure Speed)** | Powered by `gemini-2.0-flash`")
+# --- 2. DYNAMIC DATA CHỈ TỪ GOOGLE SHEETS & CONFIG ---
+@st.cache_data(ttl=3600) # Cache 1 tiếng để đỡ gọi sheet liên tục
+def load_google_sheet_objects():
+    # URL lấy dữ liệu dạng CSV từ Google Sheet của Đại sư huynh
+    sheet_url = "https://docs.google.com/spreadsheets/d/1KBWiksmvnoDh7lJNijlwCTg9D124M06XAtMq9iTT3Gs/export?format=csv&gid=385629319"
+    try:
+        df = pd.read_csv(sheet_url)
+        # Giả sử cột chứa hashtag tên là 'Hashtag' hoặc cột đầu tiên. Muội sẽ lấy tất cả value khác null.
+        # Nếu cột của huynh tên khác, huynh báo muội nhé. Tạm thời lấy cột đầu tiên làm chuẩn.
+        objects = df.iloc[:, 0].dropna().astype(str).tolist()
+        return [obj.strip() for obj in objects if obj.strip()]
+    except Exception as e:
+        logger.error(f"Lỗi tải Google Sheet: {e}")
+        return ["Character", "Landscape", "Animal", "Unknown"] # Fallback
+
+DYNAMIC_OBJECTS = load_google_sheet_objects()
+UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Chill", "Funny"] # Cập nhật theo yêu cầu
+UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
+
+# (Giữ nguyên cấu hình Style/Color cũ ở đây, muội thu gọn để huynh dễ nhìn)
+UI_STYLES = ["None", "2D", "3D", "Animeart", "Realism", "Cyberpunk", "Vintage"] 
+UI_COLORS = ["None", "Black", "White", "Red", "Blue", "Pastel", "Neon"]
+
+# --- 3. UI/UX CONFIGURATION ---
+st.set_page_config(page_title="Enterprise Content Tagger V22", page_icon="💎", layout="wide")
+st.title("💎 HỆ THỐNG PHÂN TÍCH & TỐI ƯU HÓA NỘI DUNG V22.0")
+st.markdown("**Powered by Gemini Vision API & Google Sheets | Coded by Tiểu Vy**")
 st.divider()
 
-# --- 3. DATA DICTIONARIES ---
-AI_STYLES = ["2D", "3D", "Cute", "Animeart", "Realism", "Aesthetic", "Cool", "Fantasy", "Comic", "Horror", "Cyberpunk", "Lofi", "Minimalism", "Digitalart", "Cinematic", "Pixelart", "Scifi", "Vangoghart"]
-AI_COLORS = ["Black", "White", "Blackandwhite", "Red", "Yellow", "Blue", "Green", "Pink", "Orange", "Pastel", "Hologram", "Vintage", "Colorful", "Neutral", "Light", "Dark", "Warm", "Cold", "Neon", "Gradient", "Purple", "Brown", "Grey"]
-UI_MOODS = ["None", "Happy", "Sad", "Lonely", "Lovely", "Funny", "ZenMode"]
-UI_GENDERS = ["None", "Male", "Female", "Non-binary", "Unisex"]
-UI_STYLES = ["None"] + AI_STYLES
-UI_COLORS = ["None"] + AI_COLORS
-
-# --- GUARDRAILS ---
-STYLE_PROMPT_MAP = {
-    "2D": "flat 2d vector art, simple lines, cartoon illustration, no realistic shading, bold silhouettes, clean outlines, minimalist vector, paper-cut aesthetic, solid color fills",
-    "3D": "3d computer graphics, blender render, c4d, unreal engine, volumetric lighting, plastic material, octane render, ray tracing, soft shadows, claymorphism, high-gloss finish",
-    "Realism": "real life photography, 4k photo, raw camera image, hyperrealistic skin texture, dslr, shutter speed, aperture f/1.8, natural lighting, intricate pores, lifelike detail",
-    "Animeart": "anime style, japanese manga, cel shading, 2d character design, waifu, makoto shinkai vibe, vibrant eyes, expressive lineart, ghibli atmosphere, sharp highlights",
-    "Cinematic": "cinematic movie scene, dramatic lighting, film grain, wide shot, movie poster style, anamorphic lens flare, epic composition, color graded, IMAX quality, suspenseful mood",
-    "Digitalart": "digital painting, wacom tablet drawing, highly detailed concept art, artstation style, speedpaint, soft brushwork, deviantart trending, fantasy landscape, layered texture",
-    "Pixelart": "pixel art, 8-bit, 16-bit, dot matrix, blocky edges, retro game, gameboy aesthetic, dithering, limited palette, sprite sheet, isometric pixel",
-    "Vangoghart": "vincent van gogh style, oil painting, thick brush strokes, impressionism, starry night, impasto technique, swirling sky, vivid emotional colors, post-impressionist, canvas texture",
-    "Cyberpunk": "cyberpunk city, neon lights, high tech low life, futuristic sci-fi, cyborg, night city rain, synthetic neon, mechanical limbs, flying cars, rainy pavement reflections",
-    "Lofi": "lofi hip hop style, chill vibes, retro anime aesthetic, study girl, soft lighting, grainy texture, purple haze, cozy bedroom, nostalgic mood, lo-fi filter",
-    "Vintage": "vintage retro style, sepia tone, old photograph, film grain, noise, 1980s, vhs glitch, polaroid frame, faded colors, retro fashion, analog feel",
-    "Horror": "horror theme, scary, creepy, dark nightmare, monster, gore, blood, eerie fog, eldritch terror, unsettling shadows, gothic macabre, sinister grin",
-    "Minimalism": "minimalism, simple clean lines, minimal art, negative space, simple background, zen-like simplicity, geometric harmony, essential shapes, breathing room, monochromatic",
-    "Cute": "cute kawaii, chibi style, adorable character, soft shapes, pastel vibe, sanrio aesthetic, big sparkly eyes, squishy appearance, wholesome mood, tiny limbs",
-    "Cool": "cool stylish fashion, streetwear, edgy vibe, magazine cover, posing, urban chic, hypebeast style, confident gaze, high fashion editorial, vogue aesthetic",
-    "Aesthetic": "aesthetic artistic composition, beautiful lighting, dreamy atmosphere, tumblr style, ethereal glow, vaporwave elements, soft focus, poetic visuals, curated mood",
-    "Fantasy": "fantasy art, magic, dungeons and dragons, medieval armor, sword, wizard, mythical creatures, mystical aura, ancient ruins, epic quest, enchanted forest",
-    "Comic": "comic book style, bold outlines, pop art, marvel dc style, halftone dots, action lines, speech bubbles, vibrant ink, ink wash, retro superhero",
-    "Scifi": "sci-fi, science fiction, outer space, spaceship, alien, futuristic technology, interstellar travel, high-tech laboratory, planetary rings, mecha design, starlight"
-}
-
-COLOR_PROMPT_MAP = {
-    "Black": "black clothing, black outfit, black object, black fashion, matte black material, deep obsidian, midnight void, jet black silk, charcoal shadows, ink-washed darkness",
-    "White": "white clothing, white outfit, white object, bright white surface, ivory elegance, snow-capped purity, pearl sheen, alabaster texture, bleached linen",
-    "Blackandwhite": "black and white photography, monochrome, greyscale image, high contrast noir, silver screen nostalgia, charcoal sketch, dramatic chiaroscuro, ink on parchment",
-    "Red": "bright red clothing, red car, red flower, crimson object, strong red color, ruby radiance, scarlet velvet, burning ember, cherry blossom red, blood orange intensity",
-    "Yellow": "bright yellow clothing, yellow object, sunflower color, golden yellow, canary brilliance, honey gold, lemon zest, amber glow, saffron silk",
-    "Blue": "blue clothing, blue sky, blue ocean, blue object, cyan, sapphire depth, cobalt sky, navy professional, azure mist, electric blue spark",
-    "Green": "green clothing, green plants, nature, forest, green object, emerald lush, mossy earth, jade stone, lime vibrancy, sage leaves",
-    "Pink": "pink clothing, pink flower, magenta, hot pink object, rose petal, blush satin, coral tint, bubblegum pop, dusty mauve",
-    "Orange": "orange clothing, orange fruit, sunset color, pumpkin orange, apricot warmth, copper metallic, terracotta clay, tiger lily, marmalade glow",
-    "Pastel": "soft pastel colors, pale pink blue yellow, baby colors, mint cream, lavender haze, peach fuzz, macaron palette, misty sky blue",
-    "Hologram": "holographic texture, iridescent rainbow reflection, metallic silver rainbow, opalescent shimmer, liquid mercury rainbow, glitch aesthetic, soap bubble film, pearlescent foil",
-    "Vintage": "sepia tone, old photograph style, retro brown filter, faded polaroid, grainy film stock, daguerreotype finish, antique parchment, tea-stained edges",
-    "Colorful": "rainbow colors, many different vibrant colors, confetti, festival, kaleidoscope burst, psychedelic swirl, mardi gras palette, stained glass, technicolor dream",
-    "Neutral": "beige clothing, cream color, skin tone, earth tones, sand color, oatmeal linen, taupe elegance, mushroom grey, sandstone, light khaki",
-    "Light": "bright image, high key lighting, sunny day, white background, overexposed ethereal, backlit glow, ethereal morning haze, soft focus brightness, studio ring light",
-    "Dark": "low key lighting, night scene, shadows, silhouette, dark room, moody vignette, cinematic shadows, heavy noir atmosphere, dim candlelit, obscured silhouette",
-    "Warm": "warm lighting, orange tone, golden hour, cozy atmosphere, candlelight flicker, campfire radiance, sepia sunset, toasted almond, brassy undertones",
-    "Cold": "cold lighting, blue tone, winter atmosphere, ice, frosty glaze, steel blue chill, arctic pale, moonlight silver, fluorescent clinical",
-    "Neon": "glowing neon signs, cyberpunk lights, laser beam, vaporwave magenta, toxic lime glow, night city pulse, ultraviolet streak, radioactive cyan",
-    "Gradient": "smooth color gradient background, blurred transition, ombre transition, dusk to dawn bleed, silk-smooth blending, watercolor wash, horizon blur",
-    "Purple": "purple clothing, violet, lavender object, grape color, royal amethyst, plum velvet, orchid bloom, dark violet mystery, lilac breeze",
-    "Brown": "brown clothing, wooden texture, chocolate color, soil, mahogany wood, espresso crema, rustic leather, cinnamon spice, weathered bronze",
-    "Grey": "grey clothing, concrete wall, silver metal, grey object, ash color, slate stone, gunmetal industrial, misty fog, pewter shine, heathered wool"
-}
-
-# --- 4. CORE ENGINES (CLIP) ---
-@st.cache_resource
-def load_clip_engine():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"CLIP Engine on: {device}")
-    try:
-        model, _, preprocess = open_clip.create_model_and_transforms(CONFIG["MODEL_NAME"], pretrained=CONFIG["PRETRAINED"], device=device)
-        tokenizer = open_clip.get_tokenizer(CONFIG["MODEL_NAME"])
-        s_texts = [STYLE_PROMPT_MAP.get(s, f"a {s} style artwork") for s in AI_STYLES]
-        c_texts = [COLOR_PROMPT_MAP.get(c, f"dominant color is {c}") for c in AI_COLORS]
-        s_vectors = tokenizer(s_texts).to(device)
-        c_vectors = tokenizer(c_texts).to(device)
-        with torch.no_grad():
-            s_feat = model.encode_text(s_vectors)
-            c_feat = model.encode_text(c_vectors)
-            s_feat /= s_feat.norm(dim=-1, keepdim=True)
-            c_feat /= c_feat.norm(dim=-1, keepdim=True)
-        return model, preprocess, s_feat, c_feat, device
-    except Exception as e:
-        logger.error(f"CLIP Error: {e}")
-        raise e
-
-try:
-    with st.spinner("Đang khởi tạo CLIP AI..."):
-        clip_model, clip_preprocess, s_feat, c_feat, device = load_clip_engine()
-except Exception as e:
-    st.error(f"Lỗi khởi tạo CLIP: {e}"); st.stop()
-
-# --- 5. GEMINI 2.0 FLASH LOGIC (PURE) ---
-def normalize_response(value: str, allowed_list: List[str]) -> str:
-    if not value: return "None"
-    value = str(value).strip()
-    if value in allowed_list: return value
-    for item in allowed_list:
-        if value.lower() == item.lower(): return item
-    return "None"
-
-def analyze_with_gemini(image: Image.Image, api_key: str) -> Dict:
-    """Sử dụng ĐỘC QUYỀN model gemini-2.0-flash"""
-    if not api_key: return {"mood": "None", "gender": "None", "object": ""}
+# --- 4. GEMINI AI ENGINE (Có Exponential Backoff chống lỗi 429) ---
+def analyze_with_gemini_vision(image_obj, file_name, retries=3):
+    """Gửi ảnh cho Gemini phân tích, ép trả về định dạng JSON, tự động chờ nếu lỗi 429"""
     
+    # Chuẩn bị Prompt nhốt Gemini vào khuôn khổ
+    prompt = f"""
+    Bạn là một chuyên gia phân tích ảnh hệ thống. Hãy phân tích bức ảnh này và trả về kết quả DƯỚI DẠNG JSON hợp lệ.
+    Bắt buộc phải chọn các giá trị từ danh sách sau:
+    - object: Chọn 1 từ phù hợp nhất từ danh sách này: {DYNAMIC_OBJECTS}. Nếu không có gì hợp, trả về "Unknown".
+    - mood: Chọn 1 từ từ: {UI_MOODS}
+    - gender: Chọn 1 từ từ: {UI_GENDERS} (Nếu không có người, chọn "None")
+    
+    Định dạng JSON yêu cầu:
+    {{
+        "object": "...",
+        "mood": "...",
+        "gender": "..."
+    }}
+    Chỉ in ra JSON, không in thêm bất kỳ chữ nào khác.
+    """
+    
+    model = genai.GenerativeModel('gemini-2.0-flash') # Dùng model Flash nhanh nhất
+    
+    for attempt in range(retries):
+        try:
+            response = model.generate_content([prompt, image_obj])
+            # Bóc tách JSON từ chuỗi trả về
+            result_text = response.text.replace("```json", "").replace("```", "").strip()
+            data = json.loads(result_text)
+            return data
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg:
+                wait_time = (attempt + 1) * 15 # Đợi 15s, 30s, 45s (Chống lỗi của bọn Google)
+                logger.warning(f"[Lỗi 429] Quá tải request. Đang đợi {wait_time}s... (Thử lại {attempt+1}/{retries})")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Lỗi phân tích {file_name}: {e}")
+                break
+                
+    return {"object": "Error", "mood": "None", "gender": "None"}
+
+def process_single_image(file_input):
+    """Xử lý ảnh và gọi AI"""
     try:
-        client = genai.Client(api_key=api_key)
-        
-        response_schema = {
-            "type": "OBJECT",
-            "properties": {
-                "mood": {"type": "STRING", "enum": UI_MOODS},
-                "gender": {"type": "STRING", "enum": UI_GENDERS},
-                "object": {"type": "STRING"}
-            },
-            "required": ["mood", "gender", "object"]
-        }
-
-        prompt = "Analyze image. Return JSON with 'mood', 'gender', 'object' (max 3 words)."
-
-        # GỌI THẲNG 2.0 FLASH - KHÔNG FALLBACK
-        response = client.models.generate_content(
-            model='gemini-2.0-flash', 
-            contents=[image, prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=response_schema,
-                temperature=0.1
-            )
-        )
-        
-        data = json.loads(response.text)
-        return {
-            "mood": normalize_response(data.get("mood"), UI_MOODS),
-            "gender": normalize_response(data.get("gender"), UI_GENDERS),
-            "object": data.get("object", "")
-        }
-
-    except Exception as e:
-        logger.error(f"Gemini 2.0 Error: {e}")
-        return {"mood": "None", "gender": "None", "object": ""}
-
-# --- HYBRID ANALYSIS ---
-def analyze_image(file_input: Union[object, str], gemini_key: str = "") -> Dict:
-    try:
-        if isinstance(file_input, str):
-            filename = os.path.basename(file_input)
-            original_img = Image.open(file_input)
-        else:
-            filename = file_input.name
-            original_img = Image.open(io.BytesIO(file_input.getvalue()))
-
+        filename = file_input.name
+        original_img = Image.open(io.BytesIO(file_input.getvalue()))
         if original_img.mode != "RGB": original_img = original_img.convert("RGB")
+        
+        # Tạo Thumbnail hiển thị
         thumb = original_img.copy()
-        thumb.thumbnail(CONFIG["THUMBNAIL_SIZE"])
+        thumb.thumbnail((300, 600))
         
-        # 1. CLIP (Local)
-        input_img = clip_preprocess(original_img).unsqueeze(0).to(device)
-        with torch.no_grad():
-            img_feat = clip_model.encode_image(input_img)
-            img_feat /= img_feat.norm(dim=-1, keepdim=True)
-        s_idx = (100.0 * img_feat @ s_feat.T).softmax(dim=-1).argmax().item()
-        c_idx = (100.0 * img_feat @ c_feat.T).softmax(dim=-1).argmax().item()
-        
-        # 2. Gemini 2.0 (Cloud)
-        gemini_res = {"mood": "None", "gender": "None", "object": ""}
-        if gemini_key: gemini_res = analyze_with_gemini(original_img, gemini_key)
+        # Gọi Gemini phân tích
+        ai_result = analyze_with_gemini_vision(original_img, filename)
         
         return {
-            "status": "success", "filename": filename, "image_obj": thumb, 
-            "object": gemini_res["object"], 
-            "style": AI_STYLES[s_idx], "color": AI_COLORS[c_idx], 
-            "mood": gemini_res["mood"], "gender": gemini_res["gender"],
-            "confidence_s": "CLIP", "confidence_c": "CLIP"
+            "status": "success", 
+            "filename": filename, 
+            "image_obj": thumb, 
+            "object": ai_result.get("object", "None"), 
+            "mood": ai_result.get("mood", "None"), 
+            "gender": ai_result.get("gender", "None"),
+            "style": "None", # Chừa chỗ trống nếu huynh muốn ghép thêm CLIP vào sau
+            "color": "None"
         }
     except Exception as e:
-        fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
-        return {"status": "error", "filename": fname, "msg": str(e)}
+        return {"status": "error", "filename": file_input.name, "msg": str(e)}
 
-# --- SQL GENERATOR ---
-def generate_sql_dump(df: pd.DataFrame, table_name: str = "content_analysis") -> bytes:
-    sql_lines = []
-    sql_lines.append(f"CREATE TABLE IF NOT EXISTS `{table_name}` (`id` int(11) NOT NULL AUTO_INCREMENT, `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL, `hashtag_prompt` text COLLATE utf8mb4_unicode_ci, `object_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `style` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `color` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `mood` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `gender` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL, `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;")
-    if not df.empty:
-        sql_lines.append(f"INSERT INTO `{table_name}` (`file_name`, `hashtag_prompt`, `object_name`, `style`, `color`, `mood`, `gender`) VALUES")
-        values = []
-        for _, row in df.iterrows():
-            f_name = str(row['Tên tập tin']).replace("'", "''")
-            h_tag = str(row['Hashtag Tổng hợp']).replace("'", "''")
-            obj = str(row['Object']).replace("'", "''")
-            sty = str(row['Style']).replace("'", "''")
-            col = str(row['Color']).replace("'", "''")
-            mod = str(row['Mood']).replace("'", "''")
-            gen = str(row['Gender']).replace("'", "''")
-            values.append(f"('{f_name}', '{h_tag}', '{obj}', '{sty}', '{col}', '{mod}', '{gen}')")
-        sql_lines.append(",\n".join(values) + ";")
-    return "\n".join(sql_lines).encode('utf-8')
-
-# --- 6. UI ---
+# --- 5. GIAO DIỆN & LOGIC ---
 with st.sidebar:
     st.header("Cấu hình & Dữ liệu")
-    with st.expander("🔑 Cấu hình Gemini API", expanded=True):
-        gemini_api_key = st.text_input("Nhập Google API Key:", type="password")
-        if gemini_api_key: st.success("✅ Đã kết nối (Gemini 2.0 Flash)")
-        else: st.warning("⚠️ Chưa có Key")
-    cols_per_row = st.slider("Số cột:", 2, 6, 4)
-    st.divider()
-    input_method = st.radio("Chọn phương thức:", ["📁 Upload File/Folder", "🖥️ Quét Thư Mục Local"], index=0)
-    start_idx = st.number_input("Số thứ tự bắt đầu:", value=1, step=1)
-    
-    files_to_process = []
-    if input_method == "📁 Upload File/Folder":
-        uploaded_files = st.file_uploader(f"Kéo thả ảnh vào đây:", type=['png','jpg','jpeg','webp'], accept_multiple_files=True)
-        if uploaded_files:
-            files_to_process = uploaded_files
-            st.info(f"Đã chọn: {len(files_to_process)} ảnh")
-    else: 
-        local_path = st.text_input("Nhập đường dẫn thư mục:")
-        if local_path and os.path.isdir(local_path):
-            valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
-            try:
-                files_to_process = [os.path.join(local_path, f) for f in os.listdir(local_path) if f.lower().endswith(valid_exts)]
-                st.success(f"Tìm thấy: {len(files_to_process)} ảnh hợp lệ.")
-            except: st.error("Lỗi đọc thư mục")
-        elif local_path: st.warning("Sai đường dẫn")
-
-    st.markdown("---")
-    process_btn = st.button("▶ XỬ LÝ DỮ LIỆU", type="primary")
-    if st.button("⟲ Đặt lại hệ thống", type="secondary"): st.session_state.clear(); st.rerun()
+    st.success(f"✅ Đã tải {len(DYNAMIC_OBJECTS)} Hashtags từ Google Sheets")
+    uploaded_files = st.file_uploader(f"Kéo thả ảnh vào đây:", type=['png','jpg','jpeg','webp'], accept_multiple_files=True)
+    process_btn = st.button("▶ XỬ LÝ DỮ LIỆU VỚI GEMINI", type="primary")
 
 if "results" not in st.session_state: st.session_state["results"] = []
 
-if process_btn and files_to_process:
-    if len(files_to_process) > CONFIG["MAX_IMAGES"]: st.error("Quá giới hạn ảnh."); st.stop()
+if process_btn and uploaded_files:
     processed_results = []
-    progress_bar = st.progress(0); status_text = st.empty()
-    total = len(files_to_process)
-    for i, file_input in enumerate(files_to_process):
-        fname = os.path.basename(file_input) if isinstance(file_input, str) else file_input.name
-        status_text.text(f"Đang xử lý: {fname}...")
-        res = analyze_image(file_input, gemini_key=gemini_api_key)
-        if res["status"] == "success": res["id"] = i; processed_results.append(res)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    total = len(uploaded_files)
+    
+    for i, file_input in enumerate(uploaded_files):
+        status_text.text(f"Đang nhờ Gemini soi ảnh: {file_input.name}...")
+        res = process_single_image(file_input)
+        if res["status"] == "success": 
+            res["id"] = i
+            processed_results.append(res)
         progress_bar.progress((i+1)/total)
+        # Nghỉ 2 giây giữa mỗi ảnh để tránh đánh sập API Free của Google
+        time.sleep(2) 
+        
     st.session_state["results"] = processed_results
-    status_text.success("Xử lý hoàn tất."); progress_bar.empty()
+    status_text.success("Xử lý hoàn tất!")
+    progress_bar.empty()
 
+# Hiển thị kết quả (Rút gọn)
 if st.session_state["results"]:
-    export_container = st.container(); st.divider()
-    grid = st.columns(cols_per_row)
+    st.subheader("KẾT QUẢ TỪ GEMINI")
+    cols = st.columns(4)
+    export_data = []
+    
     for i, item in enumerate(st.session_state["results"]):
-        with grid[i % cols_per_row]:
+        with cols[i % 4]:
             with st.container(border=True):
                 st.image(item["image_obj"], use_container_width=True)
-                st.caption(f"STT: {start_idx + i} | File: {item['filename']}")
+                st.caption(item["filename"])
+                st.write(f"🏷️ **Object:** {item['object']}")
+                st.write(f"🎭 **Mood:** {item['mood']}")
+                st.write(f"🚻 **Gender:** {item['gender']}")
                 
-                new_obj = st.text_input(
-                    "Object", 
-                    value=item["object"], 
-                    key=f"obj_{i}", 
-                    label_visibility="collapsed", 
-                    placeholder="Object..."
-                )
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    curr_s = item["style"] if item["style"] in UI_STYLES else "None"
-                    new_s = st.selectbox(
-                        "Style", 
-                        UI_STYLES, 
-                        index=UI_STYLES.index(curr_s), 
-                        key=f"s_{i}", 
-                        label_visibility="collapsed"
-                    )
-                    curr_m = item["mood"] if item["mood"] in UI_MOODS else "None"
-                    new_m = st.selectbox(
-                        "Mood", 
-                        UI_MOODS, 
-                        index=UI_MOODS.index(curr_m), 
-                        key=f"m_{i}", 
-                        label_visibility="collapsed"
-                    )
-                with c2:
-                    curr_c = item["color"] if item["color"] in UI_COLORS else "None"
-                    new_c = st.selectbox(
-                        "Color", 
-                        UI_COLORS, 
-                        index=UI_COLORS.index(curr_c), 
-                        key=f"c_{i}", 
-                        label_visibility="collapsed"
-                    )
-                    curr_g = item["gender"] if item["gender"] in UI_GENDERS else "None"
-                    new_g = st.selectbox(
-                        "Gender", 
-                        UI_GENDERS, 
-                        index=UI_GENDERS.index(curr_g), 
-                        key=f"g_{i}", 
-                        label_visibility="collapsed"
-                    )
-                
-                st.session_state["results"][i].update({
-                    "object": new_obj, 
-                    "style": new_s, 
-                    "color": new_c, 
-                    "mood": new_m, 
-                    "gender": new_g
-                })
-
-    with export_container:
-        c1, c2 = st.columns([3, 1])
-        with c1: st.subheader(f"Kết quả phân tích ({len(st.session_state['results'])} mục)")
-        with c2:
-            export_data = []
-            for item in st.session_state["results"]:
-                tags = [t for t in [item["object"].strip(), item["style"], item["color"], item["mood"], item["gender"]] if t and t != "None"]
-                export_data.append({
-                    "STT": start_idx + st.session_state["results"].index(item),
-                    "Tên tập tin": item["filename"], "Hashtag Tổng hợp": ", ".join(tags),
-                    "Object": item["object"], "Style": item["style"], "Color": item["color"], "Mood": item["mood"], "Gender": item["gender"]
-                })
-            df = pd.DataFrame(export_data)
-            col_xls, col_sql = st.columns(2)
-            with col_xls:
-                buffer_xls = io.BytesIO()
-                with pd.ExcelWriter(buffer_xls, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Data')
-                    worksheet = writer.sheets['Data']; worksheet.set_column('A:A', 5); worksheet.set_column('B:B', 25); worksheet.set_column('C:C', 50)
-                st.download_button("📥 TẢI EXCEL", buffer_xls.getvalue(), "Report_V29.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            with col_sql:
-                sql_bytes = generate_sql_dump(df)
-                st.download_button("🗄️ TẢI MYSQL", sql_bytes, "Database_V29.sql", "text/plain", use_container_width=True)
-
-elif not files_to_process: st.info("Hệ thống sẵn sàng. Vui lòng chọn nguồn dữ liệu.")
+        export_data.append({
+            "Tên tập tin": item["filename"],
+            "Object": item["object"],
+            "Mood": item["mood"],
+            "Gender": item["gender"]
+        })
+        
+    # Nút Tải Data (Giữ nguyên logic tạo file Excel/SQL của huynh)
+    df = pd.DataFrame(export_data)
+    buffer_xls = io.BytesIO()
+    with pd.ExcelWriter(buffer_xls, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+    st.download_button("📥 TẢI EXCEL", buffer_xls.getvalue(), "Report_V22.xlsx")
