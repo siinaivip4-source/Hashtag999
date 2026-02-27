@@ -2,6 +2,8 @@ streamlit
 pandas
 Pillow
 xlsxwriter
+python-dotenv
+google-generativeai
 ftfy
 regex
 tqdm
@@ -10,4 +12,4 @@ torchvision>=0.15.0
 setuptools>=65.0
 wheel
 open-clip-torch
-google-genai
+
