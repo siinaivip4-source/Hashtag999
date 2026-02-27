@@ -3,7 +3,7 @@ pandas
 Pillow
 xlsxwriter
 python-dotenv
-google-generativeai
+google-genai
 ftfy
 regex
 tqdm
@@ -12,4 +12,3 @@ torchvision>=0.15.0
 setuptools>=65.0
 wheel
 open-clip-torch
-
